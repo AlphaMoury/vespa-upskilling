@@ -1,0 +1,10 @@
+# Core capstone dependencies (Python 3.10–3.13; pyvespa does NOT support 3.14 yet).
+# Install into the uv-managed venv created by setup.sh.
+pyvespa>=0.50          # the Python client/library for Vespa (defines, deploys, feeds, queries)
+vespacli               # bundles the official Vespa CLI binaries (handy; needed for Vespa Cloud)
+datasets>=2.0          # to stream the BeIR/NFCorpus dataset from HuggingFace
+pandas                 # small data wrangling
+
+# Optional — only for the live web UI (04_search_ui.py). Install separately if you want it:
+#   uv pip install streamlit
+# streamlit

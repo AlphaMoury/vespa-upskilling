@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vespa.ai — TTO Brief (2 slides)</title>
+<style>
+  :root{
+    --bg:#0e1424; --bg2:#131c33; --ink:#eaf0ff; --muted:#9fb0d4;
+    --accent:#5b8cff; --accent2:#36d39a; --warn:#ffcf6b;
+    --line:#27324f; --card:#17213b;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased; overflow:hidden;
+  }
+  .deck{height:100vh;width:100vw;position:relative}
+  .slide{
+    position:absolute;inset:0;display:none;flex-direction:column;
+    padding:4.2vh 5vw 3vh;animation:fade .35s ease;
+  }
+  .slide.active{display:flex}
+  @keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  h1{font-size:3.0vw;margin:0 0 .2em;line-height:1.05;letter-spacing:-.5px}
+  h1 .sub{display:block;font-size:1.25vw;color:var(--muted);font-weight:500;margin-top:.5em;letter-spacing:0}
+  h2{font-size:1.5vw;margin:.1em 0 .6em;color:var(--accent2);font-weight:700;letter-spacing:.3px;text-transform:uppercase}
+  .kicker{color:var(--accent);font-weight:700;letter-spacing:2px;font-size:.95vw;text-transform:uppercase;margin-bottom:.6em}
+  .row{display:flex;gap:2.2vw;flex:1;min-height:0}
+  .col{flex:1;display:flex;flex-direction:column;gap:1.4vh}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:1.6vh 1.4vw}
+  .card h3{margin:0 0 .5em;font-size:1.15vw;color:var(--ink)}
+  p,li{font-size:1.12vw;line-height:1.5;color:var(--ink)}
+  .muted{color:var(--muted)}
+  ul{margin:.2em 0;padding-left:1.1em}
+  li{margin:.35em 0}
+  li b{color:#fff}
+  .accent{color:var(--accent)}
+  .green{color:var(--accent2)}
+  .warn{color:var(--warn)}
+
+  /* the three-vs-one diagram */
+  .diagram{display:flex;align-items:center;gap:1.4vw;flex-wrap:nowrap}
+  .stack{display:flex;flex-direction:column;gap:.7vh;flex:1}
+  .box{border-radius:10px;padding:1.0vh 1vw;font-size:1.0vw;text-align:center;border:1px solid var(--line)}
+  .box.bad{background:#241a2a;border-color:#46324f}
+  .box.glue{background:#2a2030;border-color:#503a4b;color:var(--muted);font-size:.9vw;font-style:italic}
+  .arrow{font-size:2.4vw;color:var(--accent);flex:0 0 auto}
+  .one{background:linear-gradient(160deg,#16305a,#13243f);border:1px solid var(--accent);
+       border-radius:14px;padding:2.2vh 1.4vw;text-align:center;flex:1.1}
+  .one .big{font-size:1.5vw;font-weight:800;color:#fff;margin-bottom:.3em}
+  .one .lbl{font-size:.92vw;color:var(--accent2);letter-spacing:1px;text-transform:uppercase}
+  .pills{display:flex;gap:.5vw;justify-content:center;flex-wrap:wrap;margin-top:1vh}
+  .pill{background:#0e1c34;border:1px solid var(--accent);border-radius:999px;padding:.4vh .8vw;font-size:.82vw;color:#cfe0ff}
+
+  /* leaderboard */
+  table.lb{width:100%;border-collapse:collapse;font-size:1.05vw}
+  table.lb td{padding:.55vh .4vw;border-bottom:1px solid var(--line)}
+  table.lb .bar{height:.9vw;background:var(--accent);border-radius:4px;display:inline-block;vertical-align:middle}
+  table.lb tr.win td{color:#fff;font-weight:700}
+  table.lb tr.win .bar{background:var(--accent2)}
+  .fillme{color:var(--warn);font-size:.8vw}
+
+  .definition{background:#0c1830;border-left:4px solid var(--accent2);padding:1.4vh 1.2vw;border-radius:0 10px 10px 0;font-size:1.18vw}
+
+  footer{display:flex;justify-content:space-between;align-items:center;margin-top:1.6vh;color:var(--muted);font-size:.85vw}
+  .dots{display:flex;gap:.5vw}
+  .dot{width:.7vw;height:.7vw;border-radius:50%;background:#2b3858}
+  .dot.on{background:var(--accent2)}
+
+  /* speaker notes */
+  #notes{position:fixed;left:0;right:0;bottom:0;max-height:42vh;overflow:auto;
+    background:#070b15;border-top:2px solid var(--accent);padding:2vh 5vw;display:none;z-index:10}
+  #notes.show{display:block}
+  #notes h4{margin:.2em 0;color:var(--accent2);font-size:1vw}
+  #notes p,#notes li{font-size:1vw;color:#cdd8f0}
+  .hint{position:fixed;right:1vw;top:1vh;color:#5b6b8c;font-size:.8vw;z-index:5}
+  .tag{display:inline-block;background:#13243f;border:1px solid var(--line);border-radius:6px;
+       padding:.2vh .5vw;font-size:.8vw;color:var(--accent);margin-right:.4vw}
+</style>
+</head>
+<body>
+<div class="hint">← →  slides &nbsp;·&nbsp; <b>F</b> fullscreen &nbsp;·&nbsp; <b>S</b> speaker notes</div>
+
+<div class="deck">
+
+  <!-- ============================ SLIDE 1 ============================ -->
+  <section class="slide active" id="s1">
+    <div class="kicker">Technology brief · Vespa.ai</div>
+    <h1>One engine instead of three.
+      <span class="sub">Vespa unifies keyword search, vector search, and ML ranking — and runs the ranking next to the data.</span>
+    </h1>
+
+    <div class="row" style="margin-top:1.5vh">
+      <div class="col" style="flex:1.25">
+        <h2>The problem today</h2>
+        <div class="diagram">
+          <div class="stack">
+            <div class="box bad">🔤 Keyword engine<br><span class="muted" style="font-size:.8vw">Elasticsearch / OpenSearch</span></div>
+            <div class="box bad">🧭 Vector database<br><span class="muted" style="font-size:.8vw">Pinecone / Weaviate</span></div>
+            <div class="box bad">🎯 Re-ranking service<br><span class="muted" style="font-size:.8vw">a separate model server</span></div>
+            <div class="box glue">+ glue code to fan out &amp; merge</div>
+          </div>
+          <div class="arrow">→</div>
+          <div class="one">
+            <div class="lbl">Vespa.ai</div>
+            <div class="big">Find · Match by meaning · Rank</div>
+            <div class="muted" style="font-size:.92vw">all in a single query, where the data lives</div>
+            <div class="pills">
+              <span class="pill">keyword (BM25)</span>
+              <span class="pill">vectors (ANN)</span>
+              <span class="pill">filters</span>
+              <span class="pill">ML ranking</span>
+            </div>
+          </div>
+        </div>
+        <div class="card" style="margin-top:.4vh">
+          <p style="margin:.1em 0"><b class="warn">The pain of three systems:</b> two copies of the data ·
+          ranking happens far from the data (network hop) · updates lag · lots to operate.</p>
+        </div>
+      </div>
+
+      <div class="col">
+        <h2>What it is</h2>
+        <div class="definition">
+          An <b>open-source</b> engine that stores your data and does <b>full-text + vector + structured
+          search with machine-learned ranking</b> in one system — computing the ranking
+          <b class="green">on the same nodes that hold the data</b>.
+        </div>
+        <div class="card">
+          <h3>Why trust it</h3>
+          <ul>
+            <li>Built inside <b>Yahoo</b> (~150 apps, ~800k queries/sec, ~1B users). Open-sourced 2017; independent company since 2023.</li>
+            <li>Powers <b>Perplexity</b>’s retrieval, <b>Spotify</b> podcast search, <b>Vinted</b> marketplace.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <span>Factored · Vespa upskilling · for TTO review</span>
+      <span class="dots"><span class="dot on"></span><span class="dot"></span></span>
+    </footer>
+  </section>
+
+  <!-- ============================ SLIDE 2 ============================ -->
+  <section class="slide" id="s2">
+    <div class="kicker">Why it matters · and what I built this weekend</div>
+    <h1 style="font-size:2.4vw">The capability — and the proof.</h1>
+
+    <div class="row">
+      <div class="col">
+        <h2>What makes it different</h2>
+        <div class="card">
+          <ul>
+            <li><b>True hybrid in one query</b> — keyword + vector + filters, fused in ranking (not merged in app code).</li>
+            <li><b>ML ranking next to the data</b> — hundreds of signals, multi-phase, no network hop to a model server.</li>
+            <li><b>Real-time updates</b> — a price or a click changes ranking on the <i>next</i> query, no reindex.</li>
+            <li><b>Scales to billions</b> of docs/vectors — one system to operate, not three.</li>
+          </ul>
+        </div>
+        <h2 style="margin-top:.4vh">Where it fits for us</h2>
+        <div class="card">
+          <p style="margin:.1em 0">When a client outgrows <b>“Elasticsearch + a vector DB + a reranker,”</b>
+          Vespa is the <b class="green">consolidation play</b>: RAG at scale, recommendations, hybrid
+          e-commerce search. The complexity it demands —
+          <span class="accent">schema design &amp; relevance tuning</span> — is exactly our value-add.</p>
+        </div>
+      </div>
+
+      <div class="col">
+        <h2>I built it, and measured it</h2>
+        <div class="card">
+          <p style="margin:.1em 0 .6em"><span class="tag">hands-on</span> Deployed Vespa in Docker, fed
+          <b>~3,600 documents</b> (Vespa generated the embeddings itself), and ranked the same queries
+          three ways. Quality measured with <b>nDCG@10</b>:</p>
+          <table class="lb">
+            <tr class="win"><td style="width:24%">Hybrid</td>
+              <td style="width:16%">0.34</td>
+              <td><span class="bar" style="width:88%"></span></td></tr>
+            <tr><td>Keyword (BM25)</td><td>0.32</td><td><span class="bar" style="width:82%"></span></td></tr>
+            <tr><td>Semantic only</td><td>0.31</td><td><span class="bar" style="width:79%"></span></td></tr>
+          </table>
+          <p class="fillme">↳ replace with YOUR numbers from <code>03_evaluate.py</code> before presenting.</p>
+          <p style="margin:.5em 0 0"><b class="green">Hybrid wins</b> — it catches the exact-term match
+          <i>and</i> the meaning. That’s the whole pitch, demonstrated.</p>
+        </div>
+        <div class="card">
+          <h3>Honest trade-offs</h3>
+          <p style="margin:.1em 0"><span class="warn">⚠</span> Steeper learning curve (YQL, schemas, ranking) ·
+          heavier ops than a hosted vector DB for tiny jobs · custom logic is Java/JVM · smaller talent pool.
+          <b>Budget weeks, not days, to production.</b></p>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <span><b class="accent">Recommendation:</b> a short spike on a real client use case (RAG or search consolidation).</span>
+      <span class="dots"><span class="dot"></span><span class="dot on"></span></span>
+    </footer>
+  </section>
+
+</div>
+
+<!-- ===================== SPEAKER NOTES (press S) ===================== -->
+<div id="notes">
+  <div id="note1">
+    <h4>Slide 1 — open here (~75 sec)</h4>
+    <p><b>Hook:</b> “Most teams that build search or RAG run three separate systems: a keyword engine
+    like Elasticsearch, a vector database like Pinecone, and a separate service to re-rank with a model.
+    That means two copies of the data, ranking that happens across the network far from the data, and a
+    freshness lag — plus a lot of glue.”</p>
+    <p><b>Turn:</b> “Vespa is one open-source engine that does all three. It was built inside Yahoo, runs
+    at the scale of a billion users, was open-sourced in 2017, and became an independent company in 2023.
+    Its key idea: it runs the ranking and the ML models <i>on the same nodes that store the data</i> — so
+    keyword, vector, filters, and a learned model are evaluated together, in one query.”</p>
+    <p><b>Proof of life:</b> “It’s the engine behind Perplexity’s retrieval, Spotify’s podcast search, and
+    Vinted’s marketplace.” <i>(All numbers here are from Vespa/Yahoo’s own pages — fine to cite, just say so.)</i></p>
+  </div>
+  <div id="note2">
+    <h4>Slide 2 — the payoff (~90 sec)</h4>
+    <p><b>Differentiators:</b> walk the four bullets, slowly. Land “real-time updates” — that’s the one
+    pure vector DBs struggle with.</p>
+    <p><b>The build (the important part):</b> “I didn’t just read about it — I built a hybrid-search app on
+    it this weekend in Python. Deployed Vespa in Docker, fed ~3,600 medical documents, let Vespa generate
+    the embeddings, and compared keyword-only, semantic-only, and hybrid using nDCG — a standard
+    search-quality metric with human relevance judgments. Hybrid won: [your numbers]. Here’s a query where
+    keyword missed the synonym, vectors missed the exact term, and hybrid caught both.”
+    <i>(Have <code>02_search.py</code> or the Streamlit UI ready for a live moment.)</i></p>
+    <p><b>Be honest:</b> deliver the trade-offs line plainly — it makes you credible. Then close on the
+    recommendation: a small spike on a real client use case.</p>
+    <p><b>If asked “is this production-grade?”</b> — “It’s 20-year-old battle-tested Yahoo infrastructure,
+    recently open-sourced. My demo is laptop-scale, but the same schema scales to billions of docs.”</p>
+  </div>
+</div>
+
+<script>
+  const slides=[...document.querySelectorAll('.slide')];
+  let i=0;
+  const notes=document.getElementById('notes');
+  function show(n){
+    i=Math.max(0,Math.min(slides.length-1,n));
+    slides.forEach((s,k)=>s.classList.toggle('active',k===i));
+    document.getElementById('note1').style.display = i===0?'block':'none';
+    document.getElementById('note2').style.display = i===1?'block':'none';
+  }
+  document.addEventListener('keydown',e=>{
+    if(e.key==='ArrowRight'||e.key===' '||e.key==='PageDown'){show(i+1);e.preventDefault();}
+    else if(e.key==='ArrowLeft'||e.key==='PageUp'){show(i-1);}
+    else if(e.key==='f'||e.key==='F'){ if(!document.fullscreenElement)document.documentElement.requestFullscreen(); else document.exitFullscreen(); }
+    else if(e.key==='s'||e.key==='S'){ notes.classList.toggle('show'); }
+    else if(e.key==='Home'){show(0);} else if(e.key==='End'){show(slides.length-1);}
+  });
+  document.addEventListener('click',e=>{ if(!notes.contains(e.target)) show(i + (e.clientX > window.innerWidth/2 ? 1 : -1)); });
+  show(0);
+</script>
+</body>
+</html>

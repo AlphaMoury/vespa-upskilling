@@ -1,0 +1,14 @@
+# Python / venv
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# pyvespa generated application package (regenerate with package.to_files())
+generated_app/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
