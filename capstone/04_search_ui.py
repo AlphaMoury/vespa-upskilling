@@ -26,7 +26,7 @@ def get_app():
 
 app = get_app()
 
-query = st.text_input("Query", value="How do fruits and vegetables help with asthma?")
+query = st.text_input("Query", value="airborne transmission of respiratory viruses")
 hits = st.slider("Results per method", 3, 10, 5)
 
 if query:

@@ -1,0 +1,7 @@
+# MPS embedding experiment — host-side GPU embedding vs Vespa's in-container CPU.
+# Use Python 3.12 venv (best torch wheel support on Apple Silicon).
+torch                 # PyTorch with the Apple Metal (MPS) backend
+sentence-transformers # e5 / bge / etc. on top of transformers
+datasets              # to pull text to embed (uses the HF cache you already have)
+numpy
+pyvespa               # for the feed step (precomputed vectors -> Vespa)

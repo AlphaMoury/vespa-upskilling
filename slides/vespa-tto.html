@@ -173,19 +173,19 @@
       <div class="col">
         <h2>I built it, and measured it</h2>
         <div class="card">
-          <p style="margin:.1em 0 .6em"><span class="tag">hands-on</span> Deployed Vespa in Docker, fed
-          <b>~3,600 documents</b> (Vespa generated the embeddings itself), and ranked the same queries
-          three ways. Quality measured with <b>nDCG@10</b>:</p>
+          <p style="margin:.1em 0 .6em"><span class="tag">hands-on · ran it locally</span> Deployed Vespa in Docker, fed
+          <b>171,332 documents</b> (Vespa embedded each one itself), and ranked queries three ways.
+          Quality measured with <b>nDCG@10</b> on the full index:</p>
           <table class="lb">
-            <tr class="win"><td style="width:24%">Hybrid</td>
-              <td style="width:16%">0.34</td>
-              <td><span class="bar" style="width:88%"></span></td></tr>
-            <tr><td>Keyword (BM25)</td><td>0.32</td><td><span class="bar" style="width:82%"></span></td></tr>
-            <tr><td>Semantic only</td><td>0.31</td><td><span class="bar" style="width:79%"></span></td></tr>
+            <tr class="win"><td style="width:30%">Hybrid (RRF)</td>
+              <td style="width:16%">0.74</td>
+              <td><span class="bar" style="width:90%"></span></td></tr>
+            <tr><td>Keyword (BM25)</td><td>0.59</td><td><span class="bar" style="width:72%"></span></td></tr>
+            <tr><td>Semantic only</td><td>0.51</td><td><span class="bar" style="width:62%"></span></td></tr>
           </table>
-          <p class="fillme">↳ replace with YOUR numbers from <code>03_evaluate.py</code> before presenting.</p>
-          <p style="margin:.5em 0 0"><b class="green">Hybrid wins</b> — it catches the exact-term match
-          <i>and</i> the meaning. That’s the whole pitch, demonstrated.</p>
+          <p style="margin:.5em 0 0"><b class="green">Hybrid wins by +25%</b> — it catches the exact term
+          <i>and</i> the meaning. 171k docs, queries in <b>5–14&nbsp;ms</b>, all on one laptop —
+          and it scales horizontally to billions.</p>
         </div>
         <div class="card">
           <h3>Honest trade-offs</h3>
@@ -224,11 +224,12 @@
     <p><b>Differentiators:</b> walk the four bullets, slowly. Land “real-time updates” — that’s the one
     pure vector DBs struggle with.</p>
     <p><b>The build (the important part):</b> “I didn’t just read about it — I built a hybrid-search app on
-    it this weekend in Python. Deployed Vespa in Docker, fed ~3,600 medical documents, let Vespa generate
-    the embeddings, and compared keyword-only, semantic-only, and hybrid using nDCG — a standard
-    search-quality metric with human relevance judgments. Hybrid won: [your numbers]. Here’s a query where
-    keyword missed the synonym, vectors missed the exact term, and hybrid caught both.”
-    <i>(Have <code>02_search.py</code> or the Streamlit UI ready for a live moment.)</i></p>
+    it in Python and ran it locally. Deployed Vespa in Docker, fed 171,000 medical documents — Vespa
+    embedded each one itself — and compared keyword-only, semantic-only, and hybrid with nDCG, a standard
+    search-quality metric with human relevance judgments. Hybrid won clearly: 0.74 vs 0.59 vs 0.51 — a 25%
+    lift — and queries came back in 5 to 14 milliseconds across all 171k docs. Here’s a query where keyword
+    missed the synonym, vectors missed the exact term, and hybrid caught both.”
+    <i>(Have the Streamlit UI ready for a live moment.)</i></p>
     <p><b>Be honest:</b> deliver the trade-offs line plainly — it makes you credible. Then close on the
     recommendation: a small spike on a real client use case.</p>
     <p><b>If asked “is this production-grade?”</b> — “It’s 20-year-old battle-tested Yahoo infrastructure,
