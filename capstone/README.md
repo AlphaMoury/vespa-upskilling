@@ -121,6 +121,39 @@ See [../docs/02-study-plan-48h.md](../docs/02-study-plan-48h.md#block-6--make-it
 
 ---
 
+## Going big (scale it up)
+
+The default run is ~3,600 docs so you get a result fast. To actually *feel* the platform,
+point it at a bigger BeIR dataset — same code, just env vars. Vespa embeds every doc on
+ingest (on CPU), so **feed throughput (docs/sec) is the thing to watch**, not storage.
+
+```bash
+# pick a bigger corpus; DATASET must match in BOTH 01 and 03
+DATASET=fiqa        python 01_deploy_and_feed.py      # ~57k  financial docs
+DATASET=trec-covid  python 01_deploy_and_feed.py      # ~171k medical docs (lots!)
+DATASET=quora MAX_DOCS=300000 WORKERS=16 python 01_deploy_and_feed.py   # ~523k, capped
+
+# in a SECOND terminal, watch the document count climb live:
+python scale_watch.py
+
+# evaluate on the same dataset (qrels come from BeIR/<DATASET>-qrels):
+DATASET=trec-covid python 03_evaluate.py
+```
+
+Knobs: `DATASET` (nfcorpus | fiqa | trec-covid | quora | scidocs | scifact …), `MAX_DOCS`
+(cap the count), `WORKERS` (feed concurrency — higher saturates more CPU cores for embedding).
+
+What to look at while it runs — this is the "see the whole thing" part:
+- `scale_watch.py` — docs/sec and the live count.
+- `curl -s "http://localhost:8080/prometheus/v1/values?consumer=vespa" | grep -i memory` — memory growth.
+- `curl -s http://localhost:8080/state/v1/health` — node health.
+- Re-run `02_search.py` mid-feed — Vespa serves queries *while* indexing (real-time).
+
+Honest scale note: 384-d vectors are ~1.5 KB each, so hundreds of thousands of docs fit in
+8 GB; the CPU embedder is the limiter. Give Docker Desktop **8 GB+** for the big datasets.
+True billion-scale is a multi-node cluster / Vespa Cloud — that's the whole point of the engine,
+and a good line for the TTO: *"this same app scales horizontally; the laptop just shows it works."*
+
 ## Troubleshooting
 
 | Symptom | Fix |

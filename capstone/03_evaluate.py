@@ -18,6 +18,7 @@ import os
 from app_package import connect_local, search_ids
 
 N_QUERIES = int(os.environ.get("N_QUERIES", "50"))
+DATASET = os.environ.get("DATASET", "nfcorpus").strip()   # must match what 01 fed
 K = 10
 MODES = ["bm25", "semantic", "fusion"]
 
@@ -37,16 +38,16 @@ def load_eval_data():
     """Returns (queries: dict[qid->text], qrels: dict[qid->dict[docid->rel]])."""
     from datasets import load_dataset
 
-    print(">> Loading queries + relevance judgments (qrels)...")
+    print(f">> Loading {DATASET} queries + relevance judgments (qrels)...")
     qrels = {}
-    qrel_ds = load_dataset("BeIR/nfcorpus-qrels", split="test")
+    qrel_ds = load_dataset(f"BeIR/{DATASET}-qrels", split="test")
     for row in qrel_ds:
         qid = str(row["query-id"])
         did = str(row["corpus-id"])
         qrels.setdefault(qid, {})[did] = int(row["score"])
 
     queries = {}
-    q_ds = load_dataset("BeIR/nfcorpus", "queries", split="queries")
+    q_ds = load_dataset(f"BeIR/{DATASET}", "queries", split="queries")
     for row in q_ds:
         queries[str(row["_id"])] = row["text"]
 

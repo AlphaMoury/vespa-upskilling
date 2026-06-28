@@ -1,17 +1,22 @@
 """
-Step 1: Deploy Vespa locally in Docker, then feed it ~3,600 medical documents.
+Step 1: Deploy Vespa locally in Docker, then feed it documents.
 
-What happens here (this is the slow, one-time step — let it run while you read):
-  1. pyvespa pulls the `vespaengine/vespa` image and starts a container on :8080.
-  2. It uploads our application package (schema + rank profiles + the e5 embedder).
-  3. Vespa downloads the e5-small-v2 ONNX model the first time it deploys.
-  4. We stream the BeIR/NFCorpus corpus from HuggingFace and feed it. Vespa generates
-     a 384-d embedding for every document ON THE WAY IN (you never compute a vector).
+By default it feeds BeIR/NFCorpus (~3,600 docs). To GO BIG, point it at a larger
+BeIR dataset and/or raise the cap — Vespa generates an e5 embedding for every doc on
+ingest, so feed throughput (docs/sec) is the thing to watch.
+
+    Usage:
+      python 01_deploy_and_feed.py                       # NFCorpus, all ~3,600 docs
+      DATASET=fiqa python 01_deploy_and_feed.py          # ~57k financial docs
+      DATASET=trec-covid python 01_deploy_and_feed.py    # ~171k medical docs  (lots!)
+      DATASET=quora MAX_DOCS=300000 python 01_deploy_and_feed.py   # ~523k, capped
+
+    Knobs (env vars):
+      DATASET    short BeIR name: nfcorpus | fiqa | trec-covid | quora | scidocs | scifact ...
+      MAX_DOCS   cap the number of docs fed (default: all)
+      WORKERS    feed concurrency (default 12) — higher saturates more CPU cores for embedding
 
 Re-running is safe; it reuses the running container. To start clean: `python teardown.py` first.
-
-    Usage:  python 01_deploy_and_feed.py
-            MAX_DOCS=500 python 01_deploy_and_feed.py     # feed fewer docs (faster)
 """
 
 import os
@@ -22,20 +27,23 @@ from vespa.io import VespaResponse
 
 from app_package import package, SCHEMA, NAMESPACE
 
+DATASET = os.environ.get("DATASET", "nfcorpus").strip()
 MAX_DOCS = int(os.environ["MAX_DOCS"]) if os.environ.get("MAX_DOCS") else None
+WORKERS = int(os.environ.get("WORKERS", "12"))
 
 
 def main():
+    print(f">> Dataset: BeIR/{DATASET}   max_docs: {MAX_DOCS or 'ALL'}   feed workers: {WORKERS}")
     print(">> Deploying Vespa in Docker (first run pulls the image + embedding model)...")
     t0 = time.time()
     vespa_docker = VespaDocker(port=8080)
     app = vespa_docker.deploy(application_package=package)
     print(f">> Deployed and ready in {time.time() - t0:.0f}s. Endpoint: http://localhost:8080")
 
-    print(">> Loading the NFCorpus corpus (streaming from HuggingFace)...")
+    print(f">> Streaming the {DATASET} corpus from HuggingFace...")
     from datasets import load_dataset
 
-    dataset = load_dataset("BeIR/nfcorpus", "corpus", split="corpus", streaming=True)
+    dataset = load_dataset(f"BeIR/{DATASET}", "corpus", split="corpus", streaming=True)
 
     def feed_docs():
         n = 0
@@ -47,30 +55,39 @@ def main():
                 "id": x["_id"],
                 "fields": {
                     "id": x["_id"],
-                    "title": x["title"] or "",
-                    "body": x["text"] or "",
+                    "title": x.get("title") or "",
+                    "body": x.get("text") or "",
                 },
             }
 
-    errors = {"n": 0}
-    fed = {"n": 0}
+    state = {"fed": 0, "errors": 0, "t_last": time.time(), "n_last": 0}
 
     def callback(response: VespaResponse, doc_id: str):
         if response.is_successful():
-            fed["n"] += 1
-            if fed["n"] % 250 == 0:
-                print(f"   ...fed {fed['n']} docs")
+            state["fed"] += 1
+            if state["fed"] % 1000 == 0:
+                now = time.time()
+                rate = (state["fed"] - state["n_last"]) / max(now - state["t_last"], 1e-6)
+                print(f"   ...fed {state['fed']:>7,} docs   ({rate:,.0f} docs/sec)")
+                state["t_last"], state["n_last"] = now, state["fed"]
         else:
-            errors["n"] += 1
-            if errors["n"] <= 5:
+            state["errors"] += 1
+            if state["errors"] <= 5:
                 print(f"   ! error feeding {doc_id}: {response.get_json()}")
 
-    print(">> Feeding (Vespa embeds each doc as it arrives — this is the work)...")
+    print(">> Feeding (Vespa embeds each doc as it arrives — watch the docs/sec)...")
     t1 = time.time()
-    app.feed_iterable(feed_docs(), schema=SCHEMA, namespace=NAMESPACE, callback=callback)
+    app.feed_iterable(
+        feed_docs(),
+        schema=SCHEMA,
+        namespace=NAMESPACE,
+        callback=callback,
+        max_queue_size=4000,
+        max_workers=WORKERS,
+        max_connections=WORKERS,
+    )
     dt = time.time() - t1
 
-    # confirm how many are searchable
     total = None
     try:
         r = app.query(yql="select * from sources * where true", hits=0)
@@ -78,11 +95,13 @@ def main():
     except Exception as e:  # noqa: BLE001
         print(f"   (could not read totalCount: {e})")
 
+    avg = state["fed"] / dt if dt else 0
     print("\n========================================")
-    print(f"  Fed {fed['n']} documents in {dt:.0f}s ({errors['n']} errors).")
+    print(f"  Fed {state['fed']:,} docs in {dt:.0f}s  (avg {avg:,.0f} docs/sec, {state['errors']} errors).")
     if total is not None:
-        print(f"  Vespa reports {total} searchable documents.")
-    print("  Next:  python 02_search.py")
+        print(f"  Vespa reports {total:,} searchable documents.")
+    print("  Watch it live:   python scale_watch.py")
+    print("  Then:            python 02_search.py   /   python 03_evaluate.py")
     print("========================================")
 
 
