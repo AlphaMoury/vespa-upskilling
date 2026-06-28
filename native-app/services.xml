@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  The SAME hybrid-search app as the Python capstone, written natively.
+  This is what pyvespa's ApplicationPackage(...) generates under the hood.
+  Deploy with the `vespa` CLI (see README.md) — no Python involved.
+
+  Single-node local deploy: hostalias "node1" auto-resolves to the one container,
+  so no hosts.xml is needed (mirrors the official album-recommendation sample).
+-->
+<services version="1.0">
+
+  <container id="default" version="1.0">
+    <document-api/>     <!-- feed / get / visit endpoints -->
+    <search/>           <!-- query endpoint + ranking -->
+
+    <!-- Vespa's built-in embedder: e5-small-v2 (int8 ONNX). Embeds documents at
+         feed time and the query at search time. Native form of pyvespa's Component(). -->
+    <component id="e5" type="hugging-face-embedder">
+      <transformer-model url="https://data.vespa-cloud.com/sample-apps-data/e5-small-v2-int8/e5-small-v2-int8.onnx"/>
+      <tokenizer-model   url="https://data.vespa-cloud.com/sample-apps-data/e5-small-v2-int8/tokenizer.json"/>
+    </component>
+
+    <nodes>
+      <node hostalias="node1"/>
+    </nodes>
+  </container>
+
+  <content id="content" version="1.0">
+    <min-redundancy>1</min-redundancy>           <!-- 1 copy: single-node local -->
+    <documents>
+      <document type="doc" mode="index"/>        <!-- index = full inverted + HNSW -->
+    </documents>
+    <nodes>
+      <node hostalias="node1" distribution-key="0"/>
+    </nodes>
+  </content>
+
+</services>

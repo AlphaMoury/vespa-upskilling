@@ -12,13 +12,15 @@ Last verified against live Vespa docs / pyvespa: **2026-06-27** (Vespa 8.7xx, py
 ```
 vespa-upskilling/
 ├── README.md                  ← you are here
+├── index.html                 ← landing page (served by GitHub Pages)
 ├── docs/
 │   ├── 01-deep-dive.md        ← the main reading material (architecture + concepts, in depth)
 │   ├── 02-study-plan-48h.md   ← an hour-by-hour plan for the weekend
-│   └── 03-cheatsheet.md       ← one-page reference: schema, YQL, ranking, pyvespa
-├── capstone/
+│   ├── 03-cheatsheet.md       ← one-page reference: schema, YQL, ranking, pyvespa
+│   ├── 04-pro-deep-dive.md    ← ★ PRO: internals, ranking/ML mastery, perf, extend, ops, fluency checklist
+│   └── 05-advanced-labs.md    ← ★ PRO: 8 hands-on labs that extend the capstone into real fluency
+├── capstone/                  ← the Python (pyvespa) project
 │   ├── README.md              ← how to run the project, step by step
-│   ├── requirements.txt
 │   ├── setup.sh               ← one command to create the env (uses uv → Python 3.13)
 │   ├── app_package.py         ← the Vespa application defined in Python
 │   ├── 01_deploy_and_feed.py  ← deploy Vespa in Docker + feed a real dataset
@@ -26,6 +28,10 @@ vespa-upskilling/
 │   ├── 03_evaluate.py         ← prove hybrid wins with an nDCG@10 leaderboard
 │   ├── 04_search_ui.py        ← optional: a tiny web UI to demo live
 │   └── teardown.py            ← stop/remove the container when done
+├── native-app/                ← ★ PRO: the SAME app as raw services.xml + .sd, deployed via the `vespa` CLI
+│   ├── services.xml · schemas/doc.sd · sample-docs.jsonl · README.md
+├── pro-java-searcher/         ← ★ PRO: a buildable Java Searcher (the engine-extension model)
+│   ├── pom.xml · src/… · README.md
 └── slides/
     └── vespa-tto.html         ← the 2-slide deck (open in a browser, press F for fullscreen)
 ```
@@ -37,6 +43,15 @@ vespa-upskilling/
 3. **Present, ~1 h.** Open [slides/vespa-tto.html](slides/vespa-tto.html). Two slides, speaker notes included below them. Rehearse the 3-minute version in [docs/02-study-plan-48h.md](docs/02-study-plan-48h.md#the-3-minute-pitch-script).
 
 If you only have a few hours total: read the **deep-dive intro + §2 + §6**, run the capstone's `01` and `02` scripts, and present the slides. That alone makes you credibly conversant.
+
+### Going pro (after the basics — for real technical fluency)
+
+The first three docs make you *conversant*. To become *fluent in the framework* — able to design schemas, tune ranking, extend the engine, and operate it — work the Pro track:
+
+4. **[docs/04-pro-deep-dive.md](docs/04-pro-deep-dive.md)** — the deep technical reference: application-package internals, ranking mastery (phases, ONNX/GBDT, learning-to-rank), ANN tuning, the query stack, performance & sizing, Java components, ops, and a **fluency checklist** to measure yourself against.
+5. **[docs/05-advanced-labs.md](docs/05-advanced-labs.md)** — eight hands-on labs that extend your capstone (export `match-features`, A/B rank profiles on nDCG, tune HNSW, real-time updates, native CLI deploy, a Java searcher, RAG). Fluency is built here, by doing.
+6. **[native-app/](native-app/)** — the *same* app written as raw `services.xml` + `.sd`, deployed with the `vespa` CLI. Read it next to `capstone/app_package.py` to see exactly what pyvespa generates. (Python stays your driver; this is so you can read/write the native form when it matters.)
+7. **[pro-java-searcher/](pro-java-searcher/)** — a buildable Java Searcher: the real way to extend Vespa with custom logic.
 
 ## The one-paragraph version (so you're oriented before you start)
 

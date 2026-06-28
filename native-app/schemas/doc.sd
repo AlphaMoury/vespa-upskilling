@@ -1,0 +1,91 @@
+# The native schema — identical in behaviour to capstone/app_package.py.
+# Compare the two side by side: this is the artifact pyvespa generates.
+
+schema doc {
+
+    document doc {
+
+        field id type string {
+            indexing: summary
+        }
+
+        # Full-text fields: tokenized inverted index + BM25 + returned in results.
+        field title type string {
+            indexing: summary | index
+            index: enable-bm25
+        }
+
+        field body type string {
+            indexing: summary | index
+            index: enable-bm25
+            bolding: on
+        }
+    }
+
+    # SYNTHETIC field (declared OUTSIDE the document block => not fed directly).
+    # Vespa builds it at feed time: concatenate title+body, run the e5 embedder,
+    # store as an in-memory attribute, and index it in an HNSW graph for ANN.
+    field embedding type tensor<float>(x[384]) {
+        indexing: input title . " " . input body | embed e5 | attribute | index
+        attribute {
+            distance-metric: angular        # cosine-style; correct for e5 (normalized)
+        }
+        index {
+            hnsw {
+                max-links-per-node: 16
+                neighbors-to-explore-at-insert: 100
+            }
+        }
+    }
+
+    # A user query searches title + body together.
+    fieldset default {
+        fields: title, body
+    }
+
+    # ---- ranking recipes -------------------------------------------------------
+
+    # 1) pure keyword
+    rank-profile bm25 {
+        inputs {
+            query(q) tensor<float>(x[384])
+        }
+        function bm25sum() {
+            expression: bm25(title) + bm25(body)
+        }
+        first-phase {
+            expression: bm25sum
+        }
+    }
+
+    # 2) pure semantic (vector closeness)
+    rank-profile semantic {
+        inputs {
+            query(q) tensor<float>(x[384])
+        }
+        first-phase {
+            expression: closeness(field, embedding)
+        }
+    }
+
+    # 3) HYBRID — first-phase recalls on vector closeness; the global-phase fuses the
+    #    BM25 ranking and the vector ranking with Reciprocal Rank Fusion (scale-free).
+    rank-profile fusion inherits bm25 {
+        inputs {
+            query(q) tensor<float>(x[384])
+        }
+        first-phase {
+            expression: closeness(field, embedding)
+        }
+        global-phase {
+            expression: reciprocal_rank_fusion(bm25sum, closeness(field, embedding))
+            rerank-count: 1000
+        }
+        # Export the underlying signals on every hit (handy for debugging / LTR).
+        match-features {
+            bm25(title)
+            bm25(body)
+            closeness(field, embedding)
+        }
+    }
+}

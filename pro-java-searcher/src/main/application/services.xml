@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  Same hybrid-search app as ../native-app, PLUS a custom Java Searcher wired into
+  the default search chain. The searcher bundle is referenced by its Maven artifactId.
+-->
+<services version="1.0">
+
+  <container id="default" version="1.0">
+    <document-api/>
+
+    <search>
+      <!-- inherits="vespa" keeps all the built-in searchers (parsing, dispatch, blending);
+           our searcher is inserted into that chain. -->
+      <chain id="default" inherits="vespa">
+        <searcher id="ai.factored.vespa.DefaultRankingSearcher" bundle="pro-java-searcher"/>
+      </chain>
+    </search>
+
+    <component id="e5" type="hugging-face-embedder">
+      <transformer-model url="https://data.vespa-cloud.com/sample-apps-data/e5-small-v2-int8/e5-small-v2-int8.onnx"/>
+      <tokenizer-model   url="https://data.vespa-cloud.com/sample-apps-data/e5-small-v2-int8/tokenizer.json"/>
+    </component>
+
+    <nodes>
+      <node hostalias="node1"/>
+    </nodes>
+  </container>
+
+  <content id="content" version="1.0">
+    <min-redundancy>1</min-redundancy>
+    <documents>
+      <document type="doc" mode="index"/>
+    </documents>
+    <nodes>
+      <node hostalias="node1" distribution-key="0"/>
+    </nodes>
+  </content>
+
+</services>

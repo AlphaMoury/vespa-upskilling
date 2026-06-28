@@ -7,8 +7,12 @@ __pycache__/
 # pyvespa generated application package (regenerate with package.to_files())
 generated_app/
 
-# OS / editor
+# OS / editor / tooling
 .DS_Store
 .idea/
 .vscode/
 *.swp
+.claude/
+
+# Maven (pro-java-searcher build output)
+target/

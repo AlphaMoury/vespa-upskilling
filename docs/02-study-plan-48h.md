@@ -95,3 +95,16 @@ Minimum viable version that still lands well:
 3. Present the slides with the pitch script; be honest that the metric demo is "next step."
 
 That's still a genuine, hands-on understanding — far more than reading marketing pages.
+
+---
+
+## After the sprint — going pro
+
+The weekend gets you *conversant and demo-ready*. To become genuinely **fluent in the framework** (the "very technical, very deep" goal), continue with the Pro track — it's built to be worked over the following 1–2 weeks, not crammed:
+
+- **[04-pro-deep-dive.md](04-pro-deep-dive.md)** — the deep reference: ranking mastery, ONNX/GBDT, learning-to-rank, ANN tuning, perf/sizing, Java components, ops, and a **fluency checklist**.
+- **[05-advanced-labs.md](05-advanced-labs.md)** — eight hands-on labs that turn the capstone into real skill. Aim for one or two per sitting; tick the fluency checklist as you go.
+- **[../native-app/](../native-app/)** — deploy the same app from raw `.sd`/`services.xml` with the `vespa` CLI.
+- **[../pro-java-searcher/](../pro-java-searcher/)** — write a Java component that runs inside Vespa.
+
+A good "I'm fluent now" milestone: complete the **capstone-of-the-capstone** in the labs (a mini learning-to-rank: export features → train an XGBoost model → deploy it to a `second-phase` → beat your hand-tuned hybrid on nDCG). That single exercise touches the entire stack.

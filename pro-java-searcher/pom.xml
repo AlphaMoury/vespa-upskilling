@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Maven build for a Vespa Java component (a Searcher), self-hosted form.
+  Packaging "container-plugin" + the bundle-plugin produce an OSGi bundle that
+  Vespa loads. The application config (services.xml, schemas) lives under
+  src/main/application/ and is assembled into target/application/ at build time.
+
+  Requires: JDK >= 17 and Maven >= 3.6.3.
+  Bump <vespa.version> to a current Vespa 8 release (https://search.maven.org -> com.yahoo.vespa:container).
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>ai.factored</groupId>
+    <artifactId>pro-java-searcher</artifactId>   <!-- == the bundle= name in services.xml -->
+    <version>1.0.0</version>
+    <packaging>container-plugin</packaging>
+
+    <properties>
+        <vespa.version>8.712.7</vespa.version>
+        <maven.compiler.release>17</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>com.yahoo.vespa</groupId>
+                <artifactId>bundle-plugin</artifactId>
+                <version>${vespa.version}</version>
+                <extensions>true</extensions>                 <!-- registers the container-plugin packaging -->
+                <configuration>
+                    <failOnWarnings>false</failOnWarnings>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <release>17</release>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.yahoo.vespa</groupId>
+            <artifactId>container</artifactId>                <!-- Searcher, Query, Result, JDisc APIs -->
+            <version>${vespa.version}</version>
+            <scope>provided</scope>                           <!-- provided by the running container, not bundled -->
+        </dependency>
+    </dependencies>
+</project>
