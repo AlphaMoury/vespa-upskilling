@@ -6,7 +6,7 @@ const INDEXES = {
   dish: {
     label: 'Catering', icon: '🍽️', accent: '#e35205', unit: 'dishes',
     placeholder: 'Try: healthy plant-based lunch for a client meeting…',
-    examples: ['healthy plant-based lunch for a client meeting', 'gluten free options', 'something spicy for the team', 'comfort food crowd pleaser'],
+    examples: ['impressive client dinner', 'spicy food that is also gluten free', 'healthy lunch vegans and meat-eaters will both like', 'office breakfast that travels well'],
     filters: true,
   },
   covid: {
@@ -81,7 +81,12 @@ export default function App() {
   const [maxprice, setMaxprice] = useState('')
   const cfg = INDEXES[schema]
 
-  useEffect(() => { fetch(`${API}/api/health`).then((r) => r.json()).then(setHealth).catch(() => {}) }, [])
+  useEffect(() => {
+    const load = () => fetch(`${API}/api/health`).then((r) => r.json()).then(setHealth).catch(() => {})
+    load()
+    const id = setInterval(load, 5000) // poll so tab counts climb live during indexing
+    return () => clearInterval(id)
+  }, [])
 
   useEffect(() => {
     if (!q.trim()) { setSugg([]); return }
