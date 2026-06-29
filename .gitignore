@@ -19,3 +19,7 @@ target/
 
 # MPS experiment venv
 mps-embed/.venv/
+
+# Node / React (ezcater-demo)
+node_modules/
+ezcater-demo/web/dist/
