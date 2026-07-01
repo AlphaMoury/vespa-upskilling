@@ -4,8 +4,9 @@ __pycache__/
 *.pyc
 *.pyo
 
-# pyvespa generated application package (regenerate with package.to_files())
+# pyvespa generated application packages (regenerate with package.to_files())
 generated_app/
+ezcater-demo/generated_ezcater/
 
 # OS / editor / tooling
 .DS_Store

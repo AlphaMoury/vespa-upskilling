@@ -122,6 +122,73 @@ def caterer_name(cuisine, i):
     return f"{random.choice(CATERER_PREFIX)} {cuisine.split(' ')[0]} {random.choice(CATERER_SUFFIX)}"
 
 
+# ---------------------------------------------------------------------------
+# FOOD ONTOLOGY enrichment (the JD's "backend data enrichment" use case).
+# In production this is LLM-generated (see build_ontology.py); here we derive a
+# clean structured ontology from the dish text so query understanding has
+# concrete fields to target. Fields: spice_level, flavor, occasion, ingredients,
+# allergens. This is what turns flat menu text into a searchable food graph.
+# ---------------------------------------------------------------------------
+SPICE = {"mapo": 3, "kung pao": 2, "gochujang": 2, "buffalo": 2, "curry": 2,
+         "tikka": 1, "masala": 1, "satay": 1, "kimchi": 1, "chipotle": 1, "tinga": 1, "shawarma": 1}
+ALLERGEN_KW = {
+    "gluten": ["bread", "pita", "naan", "pasta", "penne", "noodle", "tortilla", "bun", "brioche",
+               "phyllo", "dough", "crouton", "wrap", "bagel", "roll", "cracker", "ladyfinger"],
+    "dairy": ["cheese", "cream", "mozzarella", "feta", "yogurt", "butter", "mascarpone", "paneer",
+              "milk", "parmesan", "ricotta", "goat cheese", "icing"],
+    "nuts": ["peanut", "almond", "walnut", "pecan", "cashew", "pistachio"],
+    "shellfish": ["shrimp", "prawn"],
+    "soy": ["tofu", "soy", "edamame", "teriyaki", "miso"],
+}
+INGRED_KW = ["chicken", "pork", "beef", "tofu", "chickpea", "rice", "noodle", "hummus", "falafel",
+             "avocado", "mozzarella", "tomato", "basil", "eggplant", "olive", "feta", "shrimp", "fish",
+             "egg", "quinoa", "kale", "bean", "lentil", "paneer", "mango", "coconut", "peanut", "potato",
+             "spinach", "pita", "cucumber", "salmon", "cauliflower", "granola", "berry", "apple", "pecan"]
+
+
+def enrich(name, desc, cuisine, course, dietary):
+    t = (name + " " + desc).lower()
+    spice = 0
+    for k, v in SPICE.items():
+        if k in t:
+            spice = max(spice, v)
+    if "spicy" in t or "chili" in t:
+        spice = max(spice, 2)
+
+    allergens = set()
+    for a, kws in ALLERGEN_KW.items():
+        if any(k in t for k in kws):
+            allergens.add(a)
+    if "gluten-free" in dietary:
+        allergens.discard("gluten")
+    if "vegan" in dietary or "dairy-free" in dietary:
+        allergens.discard("dairy")
+
+    occ = set()
+    if course == "breakfast" or cuisine == "Breakfast":
+        occ |= {"breakfast", "morning"}
+    if course == "dessert":
+        occ |= {"celebration", "treat"}
+    if cuisine == "Salads & Bowls" or any(k in t for k in ["quinoa", "kale", "buddha", "salad", "healthy", "wholesome", "nutritious", "light", "good-for-you"]):
+        occ |= {"healthy", "light"}
+    if cuisine in ("Japanese", "Indian", "Italian", "Mediterranean") and course in ("main", "appetizer"):
+        occ |= {"client", "impressive", "dinner"}
+    if any(k in t for k in ["mac", "bbq", "pulled pork", "fried", "cheeseburger", "pizza", "comfort"]):
+        occ |= {"comfort", "team"}
+    if not occ:
+        occ |= {"lunch", "team"}
+
+    flavor = "sweet" if course == "dessert" else ("spicy" if spice >= 2 else ("fresh" if cuisine == "Salads & Bowls" else "savory"))
+    ingredients = sorted({w for w in INGRED_KW if w in t})
+    return {
+        "spice_level": spice,
+        "flavor": flavor,
+        "occasion": sorted(occ),
+        "ingredients": ingredients,
+        "allergens": sorted(allergens),
+    }
+
+
 def main():
     caterers, dishes = [], []
     cuisine_list = list(CUISINES)
@@ -147,12 +214,15 @@ def main():
             did += 1
             label = f"{random.choice(ADJ)} {name}" if random.random() < 0.35 else name
             serves = random.choice([5, 10, 12, 20, 25, 50])
-            price = round(random.uniform(lo, hi) * (serves / 10) * random.uniform(0.9, 1.2), 2)
+            price = round(random.uniform(lo, hi) * serves * random.uniform(0.9, 1.1), 2)  # total; price_pp ~= per head
+            onto = enrich(name, desc, cuisine, course, dietary)
             dishes.append({"id": f"d{did}", "fields": {
                 "id": f"d{did}", "name": label, "description": desc, "cuisine": cuisine,
                 "course": course, "dietary": dietary, "serves": serves, "price": price,
+                "price_pp": round(price / serves, 2),
                 "caterer_id": cid, "caterer_name": cname,
                 "popularity": random.randint(0, 100),
+                **onto,
             }})
 
     out = HERE

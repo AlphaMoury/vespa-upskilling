@@ -62,12 +62,19 @@ dish = Schema(
         Field(name="dietary", type="array<string>", indexing=["attribute", "summary"]),
         Field(name="serves", type="int", indexing=["attribute", "summary"]),
         Field(name="price", type="float", indexing=["attribute", "summary"]),
+        Field(name="price_pp", type="float", indexing=["attribute", "summary"]),
         Field(name="caterer_name", type="string", indexing=["attribute", "summary"]),
         Field(name="popularity", type="int", indexing=["attribute", "summary"]),
+        # --- food ontology (LLM-enriched in prod; see build_ontology.py) ---
+        Field(name="spice_level", type="int", indexing=["attribute", "summary"]),
+        Field(name="flavor", type="string", indexing=["attribute", "summary"]),
+        Field(name="occasion", type="array<string>", indexing=["index", "attribute", "summary"]),
+        Field(name="ingredients", type="array<string>", indexing=["index", "attribute", "summary"]),
+        Field(name="allergens", type="array<string>", indexing=["attribute", "summary"]),
         _gram("name"),
         _emb('input name . " " . input cuisine . " " . input description'),
     ]),
-    fieldsets=[FieldSet(name="default", fields=["name", "description", "cuisine"])],
+    fieldsets=[FieldSet(name="default", fields=["name", "description", "cuisine", "ingredients", "occasion"])],
     rank_profiles=_rank_profiles(["name", "description"]),
 )
 
