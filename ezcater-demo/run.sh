@@ -7,24 +7,24 @@ set -e
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 PY="$ROOT/../capstone/.venv/bin/python"
 
-have_data() {
-  "$PY" - <<'PY' 2>/dev/null
-import requests, sys
-try:
-    n = requests.get("http://localhost:8080/search/",
-                     params={"yql": "select * from dish where true", "hits": 0, "timeout": "3s"},
-                     timeout=5).json()["root"]["fields"]["totalCount"]
-    sys.exit(0 if n and n > 0 else 1)
-except Exception:
-    sys.exit(1)
+# current number of dish docs in Vespa (empty/0 if Vespa is down or empty)
+dish_count() {
+  curl -s -G "http://localhost:8080/search/" \
+    --data-urlencode "yql=select * from dish where true" \
+    --data-urlencode "hits=0" \
+    --data-urlencode "timeout=3s" 2>/dev/null \
+    | grep -o '"totalCount":[0-9]*' | head -1 | grep -o '[0-9]*' || true
 }
 
-if [ "${FRESH:-0}" = "1" ] || ! have_data; then
+N="$(dish_count)"
+: "${N:=0}"
+
+if [ "${FRESH:-0}" = "1" ] || [ "$N" -eq 0 ]; then
   [ -f "$ROOT/data/dishes.jsonl" ] || python3 "$ROOT/data/build_dataset.py"
   echo ">> deploy + feed Vespa (FRESH build — this is the slow part)..."
   ( cd "$ROOT" && "$PY" deploy_and_feed.py )
 else
-  echo ">> Vespa already has data (skipping deploy+feed). Use FRESH=1 to rebuild."
+  echo ">> Vespa already has data ($N dishes) — skipping deploy+feed. (FRESH=1 to rebuild.)"
 fi
 
 echo ">> API   -> http://localhost:8009"
