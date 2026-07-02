@@ -171,7 +171,7 @@ def _sse(obj) -> str:
 
 @app.get("/api/understand_stream")
 def understand_stream(q: str = "", hits: int = 8, source: str = "",
-                      cuisine: str = "", dietary: str = "", maxprice: str = ""):
+                      cuisine: str = "", dietary: str = "", maxprice: str = "", headcount: str = ""):
     """Server-Sent Events for the 'understood' column, in one call so understanding runs ONCE:
       token   events  — the LLM generating concepts live (only on a cache miss)
       cached  event   — concepts served from cache instantly (no generation)
@@ -221,7 +221,7 @@ def understand_stream(q: str = "", hits: int = 8, source: str = "",
         understand_ms = round((time.perf_counter() - t0) * 1000, 1)
         # --- 2) run the hybrid Vespa search and stream the results back ---
         try:
-            r = _understood_run(concepts, hits, source, extra=_facet_filter("dish", cuisine, dietary, maxprice))
+            r = _understood_run(concepts, hits, source, extra=_facet_filter("dish", cuisine, dietary, maxprice, headcount))
             yield _sse({"type": "results", "concepts": concepts, "hits": r["hits"], "graph": r["graph"],
                         "applied_filters": r["applied_filters"], "debug": r["debug"], "total": r["total"],
                         "timing": {"total_ms": round((time.perf_counter() - t0) * 1000, 1),
@@ -486,8 +486,8 @@ def _src_filter(source: str, schema: str) -> str:
     return f' and source contains "{source}"' if (source and schema == "dish") else ""
 
 
-def _facet_filter(schema: str, cuisine: str = "", dietary: str = "", maxprice: str = "") -> str:
-    """Manual UI facets (dish only) -> YQL. Applies to keyword/semantic/hybrid modes."""
+def _facet_filter(schema: str, cuisine: str = "", dietary: str = "", maxprice: str = "", headcount: str = "") -> str:
+    """Manual UI facets (dish only) -> YQL. Applies to keyword/semantic/hybrid + understood."""
     if schema != "dish":
         return ""
     parts = []
@@ -498,6 +498,11 @@ def _facet_filter(schema: str, cuisine: str = "", dietary: str = "", maxprice: s
     if maxprice:
         try:
             parts.append(f'price_pp < {float(maxprice)}')  # per-head, matches NL understanding
+        except ValueError:
+            pass
+    if headcount:  # only items whose platter serves at least the whole group
+        try:
+            parts.append(f'serves >= {int(float(headcount))}')
         except ValueError:
             pass
     return "".join(" and " + p for p in parts)
@@ -517,6 +522,8 @@ def _understood_yql(c, hits, source="", include_terms=None, extra=""):
         filt.append(f'spice_level >= {int(c["spice_min"])}')
     if c.get("max_price_pp"):
         filt.append(f'price_pp < {float(c["max_price_pp"])}')
+    if c.get("headcount"):  # "for 15 people" -> a platter that serves the whole group
+        filt.append(f'serves >= {int(c["headcount"])}')
     if include_terms:  # "with meat" -> the dish must contain one of the expanded meat ingredients
         ors = " or ".join(f'ingredients contains "{t}"' for t in sorted(set(include_terms)))
         filt.append(f"({ors})")
@@ -549,7 +556,7 @@ def _understood_run(concepts: dict, hits: int, source: str = "", extra: str = ""
 
 @app.get("/api/search")
 def search(q: str = "", mode: str = "hybrid", schema: str = "dish", hits: int = 8, source: str = "",
-           cuisine: str = "", dietary: str = "", maxprice: str = ""):
+           cuisine: str = "", dietary: str = "", maxprice: str = "", headcount: str = ""):
     if schema not in SCHEMAS or not q.strip():
         return {"mode": mode, "hits": []}
     fetch = hits * 8
@@ -560,7 +567,7 @@ def search(q: str = "", mode: str = "hybrid", schema: str = "dish", hits: int = 
         concepts = understand(q)
         understand_ms = round((time.perf_counter() - _tu) * 1000, 1)
         try:
-            r = _understood_run(concepts, hits, source, extra=_facet_filter(schema, cuisine, dietary, maxprice))
+            r = _understood_run(concepts, hits, source, extra=_facet_filter(schema, cuisine, dietary, maxprice, headcount))
             return {"mode": mode, "hits": r["hits"], "concepts": concepts, "applied_filters": r["applied_filters"],
                     "graph": r["graph"], "debug": r["debug"],
                     "timing": {"total_ms": round((time.perf_counter() - t_start) * 1000, 1),
@@ -569,7 +576,7 @@ def search(q: str = "", mode: str = "hybrid", schema: str = "dish", hits: int = 
         except Exception as e:  # noqa: BLE001
             return {"mode": mode, "hits": [], "error": str(e), "concepts": concepts}
 
-    extra = _src_filter(source, schema) + _facet_filter(schema, cuisine, dietary, maxprice)
+    extra = _src_filter(source, schema) + _facet_filter(schema, cuisine, dietary, maxprice, headcount)
     if mode == "keyword":
         params = {"yql": f"select * from {schema} where userQuery(){extra} limit {fetch}", "query": q, "ranking": "bm25"}
     elif mode == "semantic":

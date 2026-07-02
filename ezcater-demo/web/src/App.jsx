@@ -590,6 +590,7 @@ export default function App() {
   const [cuisine, setCuisine] = useState('')
   const [diet, setDiet] = useState([])
   const [maxprice, setMaxprice] = useState('')
+  const [headcount, setHeadcount] = useState('')
   const [source, setSource] = useState('')
   const [understand, setUnderstand] = useState(false)
   const [showGraph, setShowGraph] = useState(false)
@@ -618,11 +619,11 @@ export default function App() {
   const run = useCallback((query, opts = {}) => {
     const term = (query ?? q).trim()
     if (!term) return
-    const c = opts.cuisine ?? cuisine, dt = opts.diet ?? diet, mp = opts.maxprice ?? maxprice
+    const c = opts.cuisine ?? cuisine, dt = opts.diet ?? diet, mp = opts.maxprice ?? maxprice, hc = opts.headcount ?? headcount
     const src = opts.source ?? source, und = opts.understand ?? understand
     setQ(term); setLastQ(term); setOpen(false); setConcepts(null); setGraph(null)
     const sp = (schema === 'dish' && src) ? `&source=${encodeURIComponent(src)}` : ''
-    const fp = schema === 'dish' ? `&cuisine=${encodeURIComponent(c)}&dietary=${dt.join(',')}&maxprice=${mp}` : ''
+    const fp = schema === 'dish' ? `&cuisine=${encodeURIComponent(c)}&dietary=${dt.join(',')}&maxprice=${mp}&headcount=${hc}` : ''
     const url = (mode) => `${API}/api/search?schema=${schema}&mode=${mode}&q=${encodeURIComponent(term)}${sp}${fp}`
 
     // build the columns for this run (2, or 3 when understanding is on)
@@ -662,15 +663,16 @@ export default function App() {
         retrieve()
       }
     })
-  }, [q, schema, cuisine, diet, maxprice, source, understand])
+  }, [q, schema, cuisine, diet, maxprice, headcount, source, understand])
 
   const switchIndex = (s) => {
     setSchema(s); setQ(''); setLastQ(''); setCols([]); setSugg([]); setConcepts(null); setGraph(null)
-    setCuisine(''); setDiet([]); setMaxprice(''); setSource(''); setUnderstand(false)
+    setCuisine(''); setDiet([]); setMaxprice(''); setHeadcount(''); setSource(''); setUnderstand(false)
   }
   const toggleDiet = (d) => { const next = diet.includes(d) ? diet.filter((x) => x !== d) : [...diet, d]; setDiet(next); if (lastQ) run(lastQ, { diet: next }) }
   const onCuisine = (v) => { setCuisine(v); if (lastQ) run(lastQ, { cuisine: v }) }
   const onPrice = (v) => { setMaxprice(v); if (lastQ) run(lastQ, { maxprice: v }) }
+  const onHeadcount = (v) => { setHeadcount(v); if (lastQ) run(lastQ, { headcount: v }) }
   const onSource = (v) => { setSource(v); if (lastQ) run(lastQ, { source: v }) }
   const toggleUnderstand = () => { const next = !understand; setUnderstand(next); if (lastQ) run(lastQ, { understand: next }) }
 
@@ -736,6 +738,13 @@ export default function App() {
             <option value="10">under $10/head</option>
             <option value="15">under $15/head</option>
             <option value="25">under $25/head</option>
+          </select>
+          <select className="select" value={headcount} onChange={(e) => onHeadcount(e.target.value)} title="Only platters that serve at least this many (matches 'for N people')">
+            <option value="">Any headcount</option>
+            <option value="10">for 10 people</option>
+            <option value="20">for 20 people</option>
+            <option value="25">for 25 people</option>
+            <option value="50">for 50 people</option>
           </select>
           {srcEntries.length > 1 && (
             <select className="select src-select" value={source} onChange={(e) => onSource(e.target.value)} title="Filter by ingestion source (provenance)">

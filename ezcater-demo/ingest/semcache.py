@@ -44,6 +44,8 @@ def _guard_tokens(text: str) -> frozenset:
             w = w[:-1]
         if w in _GUARD_VOCAB:
             s.add(w)
+    for n in re.findall(r"\d+", text or ""):   # numbers flip intent too (headcount "for 25", budget "$20")
+        s.add("#" + n)
     return frozenset(s)
 # Cache keys are embedded with the SAME e5-small-v2 family used for search — run LOCALLY
 # (sentence-transformers), so a semantic hit is ~10-30 ms with no external call. e5 is 384-d.
