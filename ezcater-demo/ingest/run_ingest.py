@@ -45,7 +45,7 @@ def build_adapter(args):
     cls = REGISTRY[args.source]
     if args.source == "hf":
         return cls(dataset=args.dataset)
-    if args.source in ("pdf", "synthetic"):
+    if args.source in ("pdf", "synthetic", "table"):
         return cls(path=args.path) if args.path else cls()
     return cls()
 
