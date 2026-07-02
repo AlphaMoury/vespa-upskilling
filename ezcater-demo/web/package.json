@@ -15,7 +15,7 @@
     "vis-network": "^10.1.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.4",
-    "vite": "^5.4.11"
+    "@vitejs/plugin-react": "^6.0.3",
+    "vite": "^8.1.3"
   }
 }
