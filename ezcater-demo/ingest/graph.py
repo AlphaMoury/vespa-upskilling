@@ -46,6 +46,16 @@ CUISINE_FEATURES = {
     "breakfast": ["bagel", "egg", "yogurt", "granola", "avocado", "fruit", "frittata"],
 }
 
+# a positive-inclusion category (from concepts.include) -> member ingredients/dishes, so
+# "with meat" broadens the vector query toward actual meat dishes (shawarma, kebab, brisket…)
+_CATEGORY_EXPAND = {
+    "meat": ["chicken", "beef", "pork", "lamb", "brisket", "shawarma", "kebab", "carnitas", "sausage", "meatball", "steak"],
+    "poultry": ["chicken", "turkey"],
+    "seafood": ["salmon", "shrimp", "tuna", "crab", "fish"],
+    "fish": ["salmon", "tuna", "cod"],
+    "cheese": ["mozzarella", "feta", "parmesan", "cheddar"],
+}
+
 _LLM_SYS = (
     "Classify a single food INGREDIENT for a catering ontology. Return ONLY JSON with keys: "
     "allergens (array from: gluten,dairy,eggs,nuts,peanuts,soy,shellfish,fish,sesame), "
@@ -169,12 +179,18 @@ class OntologyGraph:
 
     def expand_query(self, concepts: dict) -> dict:
         """Given understood concepts, return graph-expanded terms + allergen ingredient sets.
-        cuisine -> featured terms (broaden recall); exclude_allergens -> their ingredients (explain/expand)."""
+        cuisine -> featured terms (broaden recall); include (e.g. 'meat') -> its member ingredients
+        (boosts wanted items in the vector leg); exclude_allergens -> their ingredients (explain)."""
         terms: list[str] = []
         if concepts.get("cuisine"):
             terms += self.expand_cuisine(concepts["cuisine"])
+        include_terms: list[str] = []
+        for it in (concepts.get("include") or []):
+            include_terms += _CATEGORY_EXPAND.get(str(it).lower().strip(), [str(it)])
+        terms += include_terms
         allergen_ings = {a: self.ingredients_for_allergen(a) for a in (concepts.get("exclude_allergens") or [])}
-        return {"added_terms": sorted(set(terms)), "allergen_ingredients": allergen_ings}
+        return {"added_terms": sorted(set(terms)), "allergen_ingredients": allergen_ings,
+                "include_terms": sorted(set(include_terms))}
 
     # ---------- persistence / stats ----------
     def stats(self) -> dict:

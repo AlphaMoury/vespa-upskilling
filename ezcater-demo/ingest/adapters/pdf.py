@@ -91,9 +91,12 @@ class MenuPDFAdapter:
 
     # ---- LLM path ----
     def _via_vision(self, rec: dict) -> list[MenuItem]:
-        stem = Path(rec["path"]).stem
         user = "Transcribe every menu item across these page image(s) into the JSON schema."
         data = llm.vision_json(_VISION_SYS, user, rec["images_b64"][: self.max_pages]) or {}
+        return self.items_from_vision(data, rec)
+
+    def items_from_vision(self, data: dict, rec: dict) -> list[MenuItem]:
+        """Build MenuItems from already-parsed vision JSON (so a streaming caller can reuse it)."""
         caterer = data.get("caterer") or rec["caterer_from_name"]
         out = []
         for i, it in enumerate(data.get("items", []) or []):
@@ -105,7 +108,8 @@ class MenuPDFAdapter:
             pp = round(float(price) / int(serves), 2) if price and serves else (float(price) if price else None)
             section = it.get("section") or ""
             out.append(MenuItem(
-                id=f"pdf-{stem}-{i}", name=name, description=(it.get("description") or "").strip(),
+                id="",  # empty -> MenuItem.stable_id() derives a CONTENT hash (source|name|caterer)
+                name=name, description=(it.get("description") or "").strip(),
                 cuisine=None, course=_course_from_section(section, name),
                 serves=int(serves) if serves else None, price=float(price) if price else None, price_pp=pp,
                 caterer_name=caterer, source="pdf:vision",
@@ -130,19 +134,19 @@ class MenuPDFAdapter:
         letters = [c for c in line if c.isalpha()]
         return bool(letters) and line.upper() == line and self._PRICE.search(line) is None and len(line) < 40
 
-    def _emit(self, out, stem, section, name, price, desc):
+    def _emit(self, out, section, name, price, desc):
         sm = self._SERVES.search(desc or "")
         serves = int(sm.group(1)) if sm else None
         pp = round(price / serves, 2) if (price and serves) else (price if price and price < 40 else None)
         out.append(MenuItem(
-            id=f"pdf-{stem}-{len(out)+1}", name=name[:120], description=(desc or "")[:300],
+            id="",  # content-hash id via stable_id() -> re-uploading the same menu overwrites
+            name=name[:120], description=(desc or "")[:300],
             cuisine=None, course=_course_from_section(section, name),
             serves=serves, price=price, price_pp=pp,
             caterer_name=None, source="pdf:text", confidence=0.5,
         ))
 
     def _via_text(self, rec: dict) -> list[MenuItem]:
-        stem = Path(rec["path"]).stem
         out, section = [], ""
         for text in rec.get("pages_text", []):
             lines = [l.strip() for l in text.splitlines() if l.strip()]
@@ -158,14 +162,14 @@ class MenuPDFAdapter:
                     j = i + 2
                     if j < len(lines) and self._price_only(lines[j]) is None and not self._is_section(lines[j]):
                         desc = lines[j]; j += 1
-                    self._emit(out, stem, section, line, nxt_price, desc)
+                    self._emit(out, section, line, nxt_price, desc)
                     i = j; continue
                 # or price on the same line as the name
                 m = self._PRICE.search(line)
                 if m:
                     name = self._PRICE.sub("", line).strip(" .-–—\t")
                     if len(name) >= 3:
-                        self._emit(out, stem, section, name, float(m.group(1)), "")
+                        self._emit(out, section, name, float(m.group(1)), "")
                 i += 1
         # attach a caterer name from the doc header if we saw one
         caterer = rec.get("caterer_from_name")

@@ -39,6 +39,15 @@ def _synth_caterer(seed: str) -> str:
     return f"{_CATERER_PREFIX[h % len(_CATERER_PREFIX)]} {_CATERER_SUFFIX[(h // 7) % len(_CATERER_SUFFIX)]}"
 
 
+# realistic catering platter sizes (recipes ship home-portion servings of 2-8, which are
+# not catering-scale; we reframe to standard ezCater-style tray/platter serve counts)
+_CATERING_SERVES = [5, 10, 12, 15, 20, 25, 50]
+
+
+def _catering_serves(seed: str) -> int:
+    return _CATERING_SERVES[_h(seed + "|serves") % len(_CATERING_SERVES)]
+
+
 def _synth_price(seed: str, serves: int) -> tuple[float, float]:
     pp = round(8.0 + (_h(seed) % 2200) / 100.0, 2)   # $8.00 - $30.00 per head (demo value)
     return round(pp * max(serves, 1), 2), pp
@@ -115,7 +124,7 @@ class HFRecipeAdapter:
         ingredients = _parse_r_vector(r.get("RecipeIngredientParts") or "")
         category = (r.get("RecipeCategory") or "").strip()
         keywords = " ".join(_parse_r_vector(r.get("Keywords") or ""))
-        serves = _int(r.get("RecipeServings"), 0) or 10
+        serves = _catering_serves(rid)   # reframe home-recipe portions -> catering platter size
         price, pp = _synth_price(rid, serves)
         nutrition = {k: r.get(k) for k in ("Calories", "ProteinContent", "CarbohydrateContent", "FatContent") if r.get(k)}
         return [MenuItem(
@@ -142,7 +151,7 @@ class HFRecipeAdapter:
         ingredients = [o.get("food") for o in ing_objs if isinstance(o, dict) and o.get("food")]
         if not ingredients:
             ingredients = _parse_json_list(r.get("ingredient_lines"))
-        serves = _int(r.get("servings"), 0) or 8
+        serves = _catering_serves(rid)   # reframe home-recipe portions -> catering platter size
         price, pp = _synth_price(rid, serves)
         desc = f"{name}. {cuisine or ''} {dish_type}".strip()
         return [MenuItem(

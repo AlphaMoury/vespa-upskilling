@@ -17,9 +17,34 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
+import re
 from typing import Optional
 
 _PATH = Path(__file__).resolve().parent.parent / "data" / ".semcache.json"
+
+# A cosine-only cache can false-hit: "spread WITH MEAT, no nuts" vs "spread, no nuts" are ~0.98
+# similar in text, so the embedding treats them as the same intent — but they aren't. Guard the
+# semantic tier by requiring the two queries share the same set of INTENT-FLIPPING content words
+# (diet / protein / allergen), after light plural + synonym normalization. Spice/price/occasion
+# differences are ignored (minor). Erring toward a miss is safe (it just re-calls the LLM).
+_GUARD_VOCAB = {"nut", "gluten", "dairy", "cheese", "egg", "soy", "shellfish", "fish", "sesame",
+                "meat", "vegan", "vegetarian", "pescatarian", "halal", "kosher"}
+_GUARD_SYN = {"nuts": "nut", "peanut": "nut", "peanuts": "nut", "eggs": "egg", "cheeses": "cheese",
+              "plant": "vegan", "plantbased": "vegan", "veggie": "vegetarian",
+              "beef": "meat", "chicken": "meat", "pork": "meat", "lamb": "meat", "turkey": "meat",
+              "poultry": "meat", "bacon": "meat", "sausage": "meat", "carne": "meat", "brisket": "meat",
+              "seafood": "fish", "shrimp": "shellfish"}
+
+
+def _guard_tokens(text: str) -> frozenset:
+    s = set()
+    for w in re.findall(r"[a-z]+", (text or "").lower()):
+        w = _GUARD_SYN.get(w, w)
+        if w.endswith("s") and w[:-1] in _GUARD_VOCAB:
+            w = w[:-1]
+        if w in _GUARD_VOCAB:
+            s.add(w)
+    return frozenset(s)
 # Cache keys are embedded with the SAME e5-small-v2 family used for search — run LOCALLY
 # (sentence-transformers), so a semantic hit is ~10-30 ms with no external call. e5 is 384-d.
 MODEL = "e5-small-v2 (local)"
@@ -114,7 +139,7 @@ def get(text: str) -> Optional[dict]:
         s = _cos(v, e["vec"])
         if s > best_sim:
             best, best_sim = e, s
-    if best and best_sim >= _THRESH:
+    if best and best_sim >= _THRESH and _guard_tokens(text) == _guard_tokens(best["text"]):
         stats["hits"] += 1
         return {**best["value"], "_sim": round(best_sim, 3), "_matched": best["text"], "_cache": "semantic"}
     stats["misses"] += 1
