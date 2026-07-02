@@ -32,6 +32,49 @@ const STOP = new Set(['the', 'a', 'an', 'and', 'or', 'for', 'with', 'to', 'of', 
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const tokenize = (q) => [...new Set((q || '').toLowerCase().match(/[a-z][a-z-]{2,}/g) || [])].filter((w) => !STOP.has(w))
 
+// Deterministic dish -> real food PHOTO (no LLM — purely presentational). We map a dish to a
+// food category by keyword, then show a bundled, curated photo (web/public/food/<cat>.jpg,
+// sourced from TheMealDB / TheCocktailDB). Ordered most-specific first: dish FORM (taco, salad,
+// soup…) beats a bare protein, which beats a raw ingredient.
+const FOOD_RULES = [
+  ['sushi', 'sushi|sashimi|maki|nigiri|poke'], ['burrito', 'burrito|quesadilla|enchilada|chimichanga'], ['taco', 'taco'],
+  ['pizza', 'pizza|margherita|calzone'], ['pasta', 'pasta|spaghetti|linguine|fettuccine|penne|lasagna|carbonara|bolognese|gnocchi|mac and cheese|macaroni|alfredo|ravioli'],
+  ['noodles', 'ramen|pho|noodle|lo mein|pad thai|udon|soba|chow mein'], ['soup', 'soup|bisque|chowder|broth|stew|gumbo|minestrone'],
+  ['curry', 'curry|masala|tikka|korma|biryani| dal |jambalaya|vindaloo'], ['rice', 'risotto|paella|pilaf|fried rice|rice bowl|congee'],
+  ['burger', 'burger|slider|cheeseburger'], ['wrap', 'shawarma|gyro|kebab|souvlaki|pita|wrap|spring roll'],
+  ['sandwich', 'sandwich|panini|sub |club|blt|hoagie|baguette|bagel'], ['salad', 'salad|caprese|slaw|greens|caesar|cobb|tabbouleh|bowl'],
+  ['dumpling', 'dumpling|gyoza|potsticker|empanada|samosa|wonton|pierogi'], ['falafel', 'falafel|kofta|meatball'],
+  ['shrimp', 'shrimp|prawn|tempura'], ['lobster', 'lobster|crab|crawfish'], ['oyster', 'oyster|clam|mussel|scallop'],
+  ['fish', 'salmon|tuna|cod|halibut|tilapia|trout|fish|seafood|ceviche|cedar|anchovy'],
+  ['chicken', 'chicken|poultry|wing|drumstick|nugget'], ['turkey', 'turkey'],
+  ['pork', 'pork|bacon|sausage|chorizo|ham|prosciutto|pastrami|ribs|bratwurst'],
+  ['beef', 'steak|beef|brisket|barbacoa|ribeye|sirloin|filet|carne|bbq|barbecue|pulled|lamb|veal'],
+  ['egg', 'omelet|frittata|quiche|scramble|benedict|egg|brunch'],
+  ['tofu', 'tofu|tempeh|stir fry|stir-fry|teriyaki|edamame'], ['cheese', 'charcuterie|cheese board|mozzarella|burrata|brie|fondue|caprese'],
+  ['pancake', 'pancake|waffle|french toast|crepe'], ['croissant', 'croissant|pastry|danish|scone'],
+  ['cake', 'cake|cupcake|cheesecake|tiramisu'], ['pie', 'pie|tart|cobbler'], ['cookie', 'cookie|brownie|biscotti|macaron'],
+  ['chocolate', 'chocolate|fudge|truffle|ganache'], ['icecream', 'ice cream|gelato|sorbet|sundae'], ['donut', 'donut|doughnut'],
+  ['custard', 'custard|flan|pudding|panna cotta|dessert|honey|baklava'], ['fruit', 'berry|strawberry|fruit|parfait|melon'],
+  ['coffee', 'coffee|espresso|latte|cappuccino|mocha'], ['tea', 'matcha|green tea|chai| tea'],
+  ['beer', 'beer|ale|lager|ipa'], ['wine', 'wine|sangria|rose|prosecco|champagne'], ['cocktail', 'cocktail|margarita|mojito|punch|martini'],
+  ['juice', 'juice|smoothie|lemonade|soda|milkshake|shake'],
+  ['avocado', 'avocado|guacamole'], ['mushroom', 'mushroom|portobello|shiitake'], ['corn', 'corn|elote|cornbread'],
+  ['potato', 'potato|fries|mashed|hash'], ['tomato', 'tomato|bruschetta|marinara'], ['chili', 'chili|jalape|spicy|buffalo|sriracha'],
+  ['veg', 'broccoli|cauliflower|asparagus|brussels|kale|spinach|vegetable|veggie|carrot|zucchini|roasted veg'],
+  ['eggplant', 'eggplant|aubergine|ratatouille|parmigiana'], ['beans', 'bean|chickpea|lentil|hummus|legume'],
+  ['nuts', 'peanut|almond|cashew|pistachio|walnut|pecan| nut'], ['hotdog', 'hot dog|corn dog'],
+]
+const _FOOD_RE = FOOD_RULES.map(([cat, k]) => [cat, new RegExp('\\b(' + k + ')', 'i')])
+// map a hit to a category key; defaults to a generic catering platter photo
+function foodCat(hit) {
+  const text = [hit.name, hit.desc, hit.tag, hit.sub, ...(hit.badges || [])].filter(Boolean).join(' ').toLowerCase()
+  for (const [cat, re] of _FOOD_RE) if (re.test(text)) return cat
+  const b = (hit.badges || []).map((x) => x.toLowerCase())
+  if (b.includes('vegan') || b.includes('vegetarian')) return 'salad'
+  return 'platter'
+}
+const foodImg = (hit) => `${import.meta.env.BASE_URL}food/${foodCat(hit)}.jpg`
+
 // Highlight query keywords (yellow) and graph/semantic terms (teal) inside result text.
 function highlight(text, kw = [], sem = []) {
   if (!text) return text
@@ -61,30 +104,34 @@ function Card({ hit, showScores, hl }) {
   const kw = hl?.kw || [], sem = hl?.sem || []
   return (
     <div className="card">
-      <div className="card-top">
-        <span className="dish">{highlight(hit.name, kw, sem)}</span>
-        {total != null && <span className="price">${total}</span>}
-      </div>
-      {(hit.sub || hit.tag || serves || pp) && (
-        <div className="caterer">
-          {hit.sub}{hit.tag ? <><span className="dot">·</span>{hit.tag}</> : null}
-          {serves ? <><span className="dot">·</span><span className="serves">Serves {serves}</span></> : null}
-          {pp ? <><span className="dot">·</span>${pp}/head</> : null}
+      <img className="food-img" src={foodImg(hit)} alt="" loading="lazy" aria-hidden="true"
+        onError={(e) => { const f = `${import.meta.env.BASE_URL}food/platter.jpg`; if (!e.target.src.endsWith('platter.jpg')) e.target.src = f; else e.target.style.display = 'none' }} />
+      <div className="card-body">
+        <div className="card-top">
+          <span className="dish">{highlight(hit.name, kw, sem)}</span>
+          {total != null && <span className="price">${total}</span>}
         </div>
-      )}
-      {hit.desc && <div className="desc">{highlight(hit.desc, kw, sem)}</div>}
-      <div className="chips">
-        {hit.badges?.map((d) => (
-          <span key={d} className="chip" style={{ color: DIET_COLOR[d] || '#555', background: (DIET_COLOR[d] || '#555') + '14', borderColor: (DIET_COLOR[d] || '#555') + '44' }}>{d}</span>
-        ))}
-        {hit.allergens?.length > 0 && (
-          <span className="chip alg" title={`contains: ${hit.allergens.join(', ')}`}>⚠ {hit.allergens.join(' · ')}</span>
+        {(hit.sub || hit.tag || serves || pp) && (
+          <div className="caterer">
+            {hit.sub}{hit.tag ? <><span className="dot">·</span>{hit.tag}</> : null}
+            {serves ? <><span className="dot">·</span><span className="serves">Serves {serves}</span></> : null}
+            {pp ? <><span className="dot">·</span>${pp}/head</> : null}
+          </div>
         )}
-        {src && <span className="chip src">{src}</span>}
+        {hit.desc && <div className="desc">{highlight(hit.desc, kw, sem)}</div>}
+        <div className="chips">
+          {hit.badges?.map((d) => (
+            <span key={d} className="chip" style={{ color: DIET_COLOR[d] || '#555', background: (DIET_COLOR[d] || '#555') + '14', borderColor: (DIET_COLOR[d] || '#555') + '44' }}>{d}</span>
+          ))}
+          {hit.allergens?.length > 0 && (
+            <span className="chip alg" title={`contains: ${hit.allergens.join(', ')}`}>⚠ {hit.allergens.join(' · ')}</span>
+          )}
+          {src && <span className="chip src">{src}</span>}
+        </div>
+        {showScores && (hit.bm25 != null || hit.semantic != null) && (
+          <div className="scores">BM25 <b>{hit.bm25 ?? '—'}</b><span className="dot">·</span>meaning <b>{hit.semantic ?? '—'}</b><span className="dot">·</span>score <b>{hit.relevance}</b></div>
+        )}
       </div>
-      {showScores && (hit.bm25 != null || hit.semantic != null) && (
-        <div className="scores">BM25 <b>{hit.bm25 ?? '—'}</b><span className="dot">·</span>meaning <b>{hit.semantic ?? '—'}</b><span className="dot">·</span>score <b>{hit.relevance}</b></div>
-      )}
     </div>
   )
 }
