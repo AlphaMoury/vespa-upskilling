@@ -14,16 +14,38 @@ Run:  ../../capstone/.venv/bin/python -m uvicorn main:app --port 8009
 
 import os
 import re
+import sys
+import time
 import json
+from pathlib import Path
 import requests
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+
+# make the ingestion package importable (shares the LLM provider + cost policy)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+try:
+    from ingest import config as ingest_config
+    from ingest import llm as ingest_llm
+    from ingest import semcache as ingest_semcache
+    from ingest.graph import get_graph as _get_graph
+except Exception:  # noqa: BLE001 — server still runs without the ingest package
+    ingest_config = None
+    ingest_llm = None
+    ingest_semcache = None
+    _get_graph = None
 
 VESPA = "http://localhost:8080/search/"
 SCHEMAS = {"dish": {"title": "name"}, "covid": {"title": "title"}, "question": {"title": "text"}}
 
 app = FastAPI(title="Vespa x LLM catering search")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# warm the local e5 cache embedder in the background so the first query isn't slowed by load
+if ingest_semcache is not None:
+    import threading
+    threading.Thread(target=ingest_semcache.warmup, daemon=True).start()
 
 
 def _vespa(params):
@@ -73,33 +95,54 @@ def understand_heuristic(q: str) -> dict:
             "cuisine": cuisine, "occasion": occ, "max_price_pp": mp, "headcount": hc, "method": "heuristic"}
 
 
+_UNDERSTAND_SYS = (
+    "Extract structured catering-search concepts from the query. Return ONLY JSON with keys: "
+    "free_text (string, the semantic intent), dietary (array of: vegan,vegetarian,gluten-free,dairy-free,halal,kosher), "
+    "exclude_allergens (array of: nuts,peanuts,dairy,gluten,shellfish,fish,soy,eggs,sesame), spice_min (0-3 or null), "
+    "cuisine (one of Italian,Mexican,Japanese,Indian,Thai,Mediterranean,American,Chinese,Breakfast or null), "
+    "occasion (array of: client,impressive,healthy,light,comfort,celebration,morning), "
+    "max_price_pp (number or null, per-person budget), headcount (int or null)."
+)
+
+
 def understand_llm(q: str) -> dict:
-    """Use an LLM (Anthropic) to extract concepts — the production approach. Falls back to heuristic."""
-    key = os.environ.get("ANTHROPIC_API_KEY")
-    if not key:
+    """LLM concept extraction via the shared OpenAI provider. Falls back to heuristic.
+
+    NOTE: this is only reached when config.query_llm_enabled() (LLM_QUERY=on). By policy
+    the consumer hot path defaults to the deterministic heuristic — an LLM per query is a
+    cost/latency/prompt-injection risk at ezCater's scale."""
+    if ingest_llm is None:
         return understand_heuristic(q)
-    try:
-        import anthropic  # type: ignore
-        client = anthropic.Anthropic(api_key=key)
-        sys = ("Extract structured catering-search concepts from the query. Return ONLY JSON with keys: "
-               "free_text (string, the semantic intent), dietary (array of: vegan,vegetarian,gluten-free,dairy-free,halal,kosher), "
-               "exclude_allergens (array of: nuts,dairy,gluten,shellfish,soy), spice_min (0-3 or null), "
-               "cuisine (one of Italian,Mexican,Japanese,Indian,Thai,Mediterranean,American,Chinese,Breakfast or null), "
-               "occasion (array of: client,impressive,healthy,light,comfort,celebration,morning), "
-               "max_price_pp (number or null, per-person budget), headcount (int or null).")
-        msg = client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=400,
-                                     system=sys, messages=[{"role": "user", "content": q}])
-        txt = msg.content[0].text
-        data = json.loads(re.search(r"\{.*\}", txt, re.S).group(0))
-        data["free_text"] = data.get("free_text") or q
-        data["method"] = "llm"
-        return data
-    except Exception:  # noqa: BLE001
+    data = ingest_llm.chat_json(_UNDERSTAND_SYS, q, max_tokens=400)
+    if not data:
         return understand_heuristic(q)
+    data["free_text"] = data.get("free_text") or q
+    data["method"] = "llm"
+    # backfill anything the LLM omitted with the heuristic (belt and suspenders)
+    h = understand_heuristic(q)
+    for k in ("dietary", "exclude_allergens", "cuisine", "occasion", "max_price_pp", "headcount", "spice_min"):
+        if not data.get(k):
+            data[k] = h.get(k)
+    return data
+
+
+def _llm_query_on() -> bool:
+    return bool(ingest_config and ingest_config.query_llm_enabled())
 
 
 def understand(q: str) -> dict:
-    return understand_llm(q)
+    """LLM-first (bounded by a SEMANTIC CACHE) when enabled; deterministic regex otherwise.
+    The cache keys on the query's intent embedding, so paraphrases reuse one LLM answer."""
+    if not _llm_query_on():
+        return understand_heuristic(q)
+    if ingest_semcache is not None:
+        cached = ingest_semcache.get(q)
+        if cached is not None:
+            return {**cached, "free_text": cached.get("free_text") or q, "cache": "hit"}
+    result = understand_llm(q)
+    if ingest_semcache is not None:
+        ingest_semcache.put(q, result)
+    return {**result, "cache": "miss"}
 
 
 @app.get("/api/understand")
@@ -107,12 +150,79 @@ def api_understand(q: str = ""):
     return understand(q) if q.strip() else {}
 
 
+def _sse(obj) -> str:
+    return f"data: {json.dumps(obj)}\n\n"
+
+
+@app.get("/api/understand_stream")
+def understand_stream(q: str = "", hits: int = 8, source: str = ""):
+    """Server-Sent Events for the 'understood' column, in one call so understanding runs ONCE:
+      token   events  — the LLM generating concepts live (only on a cache miss)
+      cached  event   — concepts served from cache instantly (no generation)
+      results event   — the graph-expanded hybrid Vespa search: hits + graph + timing
+    """
+    def gen():
+        t0 = time.perf_counter()
+        if not q.strip():
+            yield _sse({"type": "results", "concepts": {}, "hits": [], "graph": None})
+            return
+        # --- 1) get concepts (heuristic / cache hit / streamed LLM) ---
+        if not _llm_query_on() or ingest_llm is None:
+            concepts = understand_heuristic(q)
+            yield _sse({"type": "cached", "concepts": concepts})
+        else:
+            cached = ingest_semcache.get(q) if ingest_semcache is not None else None
+            if cached is not None:
+                concepts = {**cached, "free_text": cached.get("free_text") or q, "cache": "hit"}
+                yield _sse({"type": "cached", "concepts": concepts})
+            else:
+                acc = ""
+                try:
+                    client = ingest_llm._get_client()
+                    model = ingest_config.OPENAI_MODEL if ingest_config else "gpt-4o-mini"
+                    stream = client.chat.completions.create(
+                        model=model, temperature=0, max_tokens=400,
+                        response_format={"type": "json_object"}, stream=True,
+                        messages=[{"role": "system", "content": _UNDERSTAND_SYS}, {"role": "user", "content": q}])
+                    for chunk in stream:
+                        delta = (chunk.choices[0].delta.content or "") if chunk.choices else ""
+                        if delta:
+                            acc += delta
+                            yield _sse({"type": "token", "text": delta})
+                    concepts = ingest_llm._parse_json(acc) or understand_heuristic(q)
+                except Exception:  # noqa: BLE001
+                    concepts = understand_heuristic(q)
+                concepts["free_text"] = concepts.get("free_text") or q
+                concepts["method"] = "llm"
+                concepts["cache"] = "miss"
+                h = understand_heuristic(q)
+                for k in ("dietary", "exclude_allergens", "cuisine", "occasion", "max_price_pp", "headcount", "spice_min"):
+                    if not concepts.get(k):
+                        concepts[k] = h.get(k)
+                if ingest_semcache is not None:
+                    ingest_semcache.put(q, {k: v for k, v in concepts.items() if not str(k).startswith("_")})
+                yield _sse({"type": "done", "concepts": concepts})
+        understand_ms = round((time.perf_counter() - t0) * 1000, 1)
+        # --- 2) run the hybrid Vespa search and stream the results back ---
+        try:
+            r = _understood_run(concepts, hits, source)
+            yield _sse({"type": "results", "concepts": concepts, "hits": r["hits"], "graph": r["graph"],
+                        "applied_filters": r["applied_filters"], "debug": r["debug"], "total": r["total"],
+                        "timing": {"total_ms": round((time.perf_counter() - t0) * 1000, 1),
+                                   "vespa_ms": r["vespa_ms"], "understand_ms": understand_ms}})
+        except Exception as e:  # noqa: BLE001
+            yield _sse({"type": "results", "concepts": concepts, "hits": [], "graph": None, "error": str(e)})
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 # ---------------- result mapping ----------------
 def _map(schema, f):
     if schema == "dish":
         return dict(name=f.get("name"), sub=f.get("caterer_name"), tag=f.get("cuisine"),
                     price=f.get("price"), price_pp=f.get("price_pp"), badges=f.get("dietary", []),
-                    spice=f.get("spice_level"), allergens=f.get("allergens", []), desc=f.get("description"))
+                    spice=f.get("spice_level"), allergens=f.get("allergens", []), desc=f.get("description"),
+                    source=f.get("source"), ingredients=f.get("ingredients", []))
     if schema == "covid":
         return dict(name=f.get("title") or "(untitled)", sub="COVID-19 research", tag=None, price=None,
                     badges=[], desc=(f.get("body") or "")[:240])
@@ -127,7 +237,9 @@ def _hits(schema, resp):
         item = _map(schema, f)
         item["relevance"] = round(h.get("relevance", 0), 4)
         item["bm25"] = round(mf.get("bm25sum", 0), 2) if mf else None
-        item["semantic"] = round(mf.get("closeness(field, embedding)", 0), 3) if mf else None
+        # Vespa normalizes the feature name to no spaces: "closeness(field,embedding)"
+        clo = mf.get("closeness(field,embedding)", mf.get("closeness(field, embedding)"))
+        item["semantic"] = round(clo, 3) if (mf and clo is not None) else None
         out.append(item)
     return out
 
@@ -152,7 +264,38 @@ def health():
             counts[s] = _vespa({"yql": f"select * from {s} where true", "hits": 0})["root"]["fields"]["totalCount"]
         except Exception:  # noqa: BLE001
             counts[s] = None
-    return {"ok": any(counts.values()), "counts": counts, "llm": bool(os.environ.get("ANTHROPIC_API_KEY"))}
+    llm = ingest_config.status() if ingest_config else {"has_key": bool(os.environ.get("OPENAI_API_KEY"))}
+    graph = None
+    try:
+        graph = _get_graph().stats() if _get_graph else None
+    except Exception:  # noqa: BLE001
+        pass
+    sem = None
+    if ingest_semcache is not None:
+        sem = {"size": ingest_semcache.size(), "model": ingest_semcache.MODEL, **ingest_semcache.stats}
+    return {"ok": any(counts.values()), "counts": counts,
+            "llm": llm.get("query_llm", False),        # back-compat: is query-LLM live?
+            "llm_status": llm, "graph": graph, "semcache": sem}
+
+
+@app.get("/api/sources")
+def sources(schema: str = "dish"):
+    """Provenance facet: doc counts grouped by ingestion source (for the UI)."""
+    if schema not in SCHEMAS:
+        return {"sources": {}}
+    try:
+        yql = (f"select * from {schema} where true | "
+               "all(group(source) each(output(count())))")
+        resp = _vespa({"yql": yql, "hits": 0})
+        out = {}
+        for grp in resp.get("root", {}).get("children", []):
+            for g in grp.get("children", []):
+                for b in g.get("children", []):
+                    val = b.get("value") or "(none)"
+                    out[val] = b.get("fields", {}).get("count()", 0)
+        return {"sources": out}
+    except Exception as e:  # noqa: BLE001
+        return {"sources": {}, "error": str(e)}
 
 
 @app.get("/api/typeahead")
@@ -178,7 +321,39 @@ def typeahead(q: str = "", schema: str = "dish", limit: int = 6):
     return {"suggestions": sugg}
 
 
-def _understood_yql(c, hits):
+def _graph_expand(concepts: dict) -> dict:
+    """Query-time ONTOLOGY-GRAPH expansion: cuisine -> featured terms (broaden the vector
+    query), exclude_allergens -> their ingredient sets (for the UI explanation)."""
+    if _get_graph is None or not concepts:
+        return {"added_terms": [], "allergen_ingredients": {}}
+    try:
+        return _get_graph().expand_query(concepts)
+    except Exception:  # noqa: BLE001
+        return {"added_terms": [], "allergen_ingredients": {}}
+
+
+def _src_filter(source: str, schema: str) -> str:
+    return f' and source contains "{source}"' if (source and schema == "dish") else ""
+
+
+def _facet_filter(schema: str, cuisine: str = "", dietary: str = "", maxprice: str = "") -> str:
+    """Manual UI facets (dish only) -> YQL. Applies to keyword/semantic/hybrid modes."""
+    if schema != "dish":
+        return ""
+    parts = []
+    if cuisine:
+        parts.append(f'cuisine contains "{cuisine}"')
+    for d in [x for x in (dietary or "").split(",") if x.strip()]:
+        parts.append(f'dietary contains "{d.strip()}"')
+    if maxprice:
+        try:
+            parts.append(f'price_pp < {float(maxprice)}')  # per-head, matches NL understanding
+        except ValueError:
+            pass
+    return "".join(" and " + p for p in parts)
+
+
+def _understood_yql(c, hits, source=""):
     filt = []
     for d in c.get("dietary") or []:
         filt.append(f'dietary contains "{d}"')
@@ -191,32 +366,68 @@ def _understood_yql(c, hits):
     if c.get("max_price_pp"):
         filt.append(f'price_pp < {float(c["max_price_pp"])}')
     where = "(userQuery() or ({targetHits:200}nearestNeighbor(embedding,q)))" + "".join(" and " + f for f in filt)
+    where += _src_filter(source, "dish")
     return f"select * from dish where {where} limit {hits}", filt
 
 
+def _understood_run(concepts: dict, hits: int, source: str = "") -> dict:
+    """Given already-understood concepts, expand via the graph + run the hybrid Vespa query.
+    Shared by /api/search (mode=understood) and the streaming endpoint so understanding runs once."""
+    fetch = hits * 8
+    graph = _graph_expand(concepts)
+    free = concepts.get("free_text") or ""
+    vec_text = (free + " " + " ".join(graph.get("added_terms", []))).strip()
+    yql, applied = _understood_yql(concepts, fetch, source)
+    params = {"yql": yql, "query": free, "ranking": "hybrid", "input.query(q)": _emb(vec_text or free)}
+    _tv = time.perf_counter()
+    resp = _vespa(params)
+    vespa_ms = round((time.perf_counter() - _tv) * 1000, 1)
+    return {"hits": _dedupe(_hits("dish", resp), hits), "graph": graph, "applied_filters": applied,
+            "debug": {"yql": yql, "ranking": "hybrid", "keyword_query": free, "vector_query": vec_text},
+            "vespa_ms": vespa_ms, "total": resp.get("root", {}).get("fields", {}).get("totalCount", 0)}
+
+
 @app.get("/api/search")
-def search(q: str = "", mode: str = "hybrid", schema: str = "dish", hits: int = 8):
+def search(q: str = "", mode: str = "hybrid", schema: str = "dish", hits: int = 8, source: str = "",
+           cuisine: str = "", dietary: str = "", maxprice: str = ""):
     if schema not in SCHEMAS or not q.strip():
         return {"mode": mode, "hits": []}
     fetch = hits * 8
-    concepts, applied = None, []
+    t_start = time.perf_counter()
+    # understood: understand ONCE, then delegate to the shared helper (also used by the stream)
     if mode == "understood" and schema == "dish":
+        _tu = time.perf_counter()
         concepts = understand(q)
-        yql, applied = _understood_yql(concepts, fetch)
-        params = {"yql": yql, "query": concepts.get("free_text") or q, "ranking": "hybrid",
-                  "input.query(q)": _emb(concepts.get("free_text") or q)}
-    elif mode == "keyword":
-        params = {"yql": f"select * from {schema} where userQuery() limit {fetch}", "query": q, "ranking": "bm25"}
+        understand_ms = round((time.perf_counter() - _tu) * 1000, 1)
+        try:
+            r = _understood_run(concepts, hits, source)
+            return {"mode": mode, "hits": r["hits"], "concepts": concepts, "applied_filters": r["applied_filters"],
+                    "graph": r["graph"], "debug": r["debug"],
+                    "timing": {"total_ms": round((time.perf_counter() - t_start) * 1000, 1),
+                               "vespa_ms": r["vespa_ms"], "understand_ms": understand_ms},
+                    "total": r["total"]}
+        except Exception as e:  # noqa: BLE001
+            return {"mode": mode, "hits": [], "error": str(e), "concepts": concepts}
+
+    extra = _src_filter(source, schema) + _facet_filter(schema, cuisine, dietary, maxprice)
+    if mode == "keyword":
+        params = {"yql": f"select * from {schema} where userQuery(){extra} limit {fetch}", "query": q, "ranking": "bm25"}
     elif mode == "semantic":
-        params = {"yql": f"select * from {schema} where ({{targetHits:200}}nearestNeighbor(embedding,q)) limit {fetch}",
+        params = {"yql": f"select * from {schema} where ({{targetHits:200}}nearestNeighbor(embedding,q)){extra} limit {fetch}",
                   "ranking": "semantic", "input.query(q)": _emb(q)}
     else:
-        params = {"yql": f"select * from {schema} where userQuery() or ({{targetHits:200}}nearestNeighbor(embedding,q)) limit {fetch}",
+        params = {"yql": f"select * from {schema} where (userQuery() or ({{targetHits:200}}nearestNeighbor(embedding,q))){extra} limit {fetch}",
                   "query": q, "ranking": "hybrid", "input.query(q)": _emb(q)}
+    debug = {"yql": params.get("yql"), "ranking": params.get("ranking"),
+             "keyword_query": params.get("query"),
+             "vector_query": (q if mode in ("semantic", "hybrid") else None)}
     try:
+        _tv = time.perf_counter()
         resp = _vespa(params)
+        vespa_ms = round((time.perf_counter() - _tv) * 1000, 1)
+        timing = {"total_ms": round((time.perf_counter() - t_start) * 1000, 1), "vespa_ms": vespa_ms, "understand_ms": None}
         return {"mode": mode, "hits": _dedupe(_hits(schema, resp), hits),
-                "concepts": concepts, "applied_filters": applied,
-                "total": resp.get("root", {}).get("fields", {}).get("totalCount", 0)}
+                "concepts": None, "applied_filters": [], "graph": None, "debug": debug,
+                "timing": timing, "total": resp.get("root", {}).get("fields", {}).get("totalCount", 0)}
     except Exception as e:  # noqa: BLE001
-        return {"mode": mode, "hits": [], "error": str(e), "concepts": concepts}
+        return {"mode": mode, "hits": [], "error": str(e), "debug": debug}
