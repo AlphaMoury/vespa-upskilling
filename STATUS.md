@@ -18,9 +18,10 @@ Repo: https://github.com/AlphaMoury/vespa-upskilling · Pages: https://alphamour
 | Vespa client | **pyvespa** (Python) — schema, deploy, feed, query; also the `vespa` CLI (`vespacli`) |
 | API / proxy | **FastAPI + uvicorn** (Python) — typeahead, keyword/semantic/hybrid, **query understanding**, filters, CORS |
 | Frontend | **React + Vite** (Node) — index switcher, keyword-vs-hybrid split view, filters |
-| Datasets | **BeIR/trec-covid** (171k), **BeIR/quora** (523k), synthetic catering (600 dishes / 100 caterers) |
+| Datasets | **BeIR/trec-covid** (171k), **BeIR/quora** (523k), **Food.com recipes** (real, HF), synthetic catering, menu **PDFs** |
+| Ingestion | pluggable **`SourceAdapter`s** → one `MenuItem` schema → shared **food-ontology enrichment** → Vespa (see `ingest/`, `INGESTION.md`) |
 | Env / infra | **uv** (Python 3.13 venvs), **Docker** (bumped to ~14 GB), macOS |
-| Extras | **torch + sentence-transformers** (MPS embedding benchmark); optional **Anthropic LLM** for query understanding / ontology (heuristic fallback if no key) |
+| Extras | **PyMuPDF** (menu-PDF rasterizing), optional **OpenAI** (vision PDF parse + enrichment + query understanding); **all optional** — deterministic fallbacks, no key needed |
 
 ---
 
@@ -38,10 +39,12 @@ Repo: https://github.com/AlphaMoury/vespa-upskilling · Pages: https://alphamour
 ## The ezCater demo (`ezcater-demo/`)
 
 - **One Vespa app, three indexes** (three use cases): `dish` (catering), `covid` (research), `question` (Quora).
-- **FastAPI proxy** (`server/main.py`): `/api/typeahead`, `/api/search` (keyword|semantic|hybrid|**understood**), `/api/understand` (NL → structured concepts), per-index filters.
-- **React UI** (`web/`): tab switcher, keyword-vs-hybrid split, filters.
-- **Food ontology** (`data/build_dataset.py` `enrich()`): dishes enriched with spice_level, flavor, occasion, ingredients, allergens, price/head — the "backend data enrichment" use case.
-- **Query understanding** (`server/main.py`): NL query → `{dietary, exclude_allergens, spice_min, cuisine, max_price_pp, headcount, ...}` → precise Vespa query — the "frontend query understanding" use case. LLM (Anthropic) if `ANTHROPIC_API_KEY`, else a heuristic parser.
+- **Multi-source ingestion** (`ingest/`, see **`INGESTION.md`**): any source → one `MenuItem` schema → shared enrichment → hybrid Vespa. Adapters: `synthetic` (curated catalog), `hf` (real **Food.com** recipes), `pdf` (menu PDFs via **vision-LLM** or text fallback). Mirrors ezCater's Temporal+Kafka→Vespa pipeline. The `dish` index now carries a `source` provenance field.
+- **FastAPI proxy** (`server/main.py`): `/api/typeahead`, `/api/search` (keyword|semantic|hybrid|**understood**, + `source`/cuisine/dietary/price filters), `/api/understand`, `/api/sources` (provenance facet), `/api/health` (live LLM-policy flags).
+- **React UI** (`web/`): tab switcher, keyword-vs-hybrid split, **query-understanding view** (NL → extracted concepts, side-by-side vs plain hybrid), source badges + source filter, working facet filters, LLM-policy pill.
+- **Food ontology / enrichment** (`ingest/enrich.py` + `taxonomy.py` + `off.py`): ingredient→allergen/diet inference (curated spine + optional Open Food Facts + optional LLM), cached by ingredient-set hash — the "backend data enrichment" use case. Dietary inference has a safety guard (never mislabels meat as vegan).
+- **Query understanding** (`server/main.py`): NL query → `{dietary, exclude_allergens, spice_min, cuisine, max_price_pp, headcount, ...}` → precise Vespa query with allergens as **hard filters** — the "frontend query understanding" use case.
+- **LLM cost policy** (`ingest/config.py`): LLM is **index-time only + cached** (`LLM_INDEX=auto`); the query hot path is **deterministic by default** (`LLM_QUERY=off`). Everything runs with **no key**. Uses **OpenAI** when a key is present. See **`INTERVIEW-PREP.md`**.
 
 ---
 
@@ -58,6 +61,9 @@ bash run.sh
 
 # Rebuild everything from scratch (deploy + re-feed all indexes, ~40 min):
 FRESH=1 bash run.sh
+
+# Run the multi-source ingestion into the dish index (synthetic + Food.com + menu PDFs):
+INGEST=1 bash run.sh          # or the individual commands in INGESTION.md
 ```
 
 Stop: Ctrl-C the `run.sh` (stops API + UI). `docker stop ezcater` pauses Vespa (data persists);
@@ -68,16 +74,22 @@ Stop: Ctrl-C the `run.sh` (stops API + UI). `docker stop ezcater` pauses Vespa (
 
 ---
 
-## Current state (2026-07-01)
+## Current state (2026-07-02)
 
-- Vespa container **up**, full data: dish **600** · covid **171,332** · quora **522,931**.
-- **Backend** (FastAPI) has the food-ontology + query-understanding wired and tested.
-- **React UI** is still the 3-index keyword-vs-hybrid version — the **query-understanding UI is not wired yet** (next step).
+- Vespa container **up**. `dish` index fed from **three real sources** (synthetic catalog · **Food.com** recipes · menu **PDFs**) with a `source` provenance field; covid **171,332** · quora **522,931** intact.
+- **Multi-source ingestion pipeline** (`ingest/`) built + validated: `MenuItem` schema, `SourceAdapter` interface, shared food-ontology enrichment, unified `run_ingest.py` CLI.
+- **Ontology graph** (`ingest/graph.py`, NetworkX): real ingredient/allergen/diet/cuisine graph, seeded from the taxonomy and **LLM-grown at ingest** (136 → 560 ingredients after an LLM re-feed). Used at index time (enrich) *and* query time (concept expansion).
+- **Query understanding**: **LLM-first + two-tier semantic cache** (`ingest/semcache.py`) — instant exact tier, then a **local e5-small-v2** tier (~20 ms, same model family as search, no external call). Deterministic regex fallback.
+- **Serving** (FastAPI): graph-expanded hybrid (BM25 + e5 vectors + hard filters, RRF); **SSE streaming** (`/api/understand_stream`) of the LLM tokens + results in one call; per-approach timing; provenance facet; working filters. Fixed the `closeness(field,embedding)` key so the semantic score is real.
+- **React UI**: **3-column progressive** compare (Keyword | Hybrid | Understood) with the understood column **streaming the LLM live**; collapsed unified understanding panel (concepts + SVG graph) + "how this search works" pipeline; keyword/graph highlighting; per-head prices; ranking labels.
+- **Docs**: `INGESTION.md` (architecture + diagram + what's real/synthesized/not-built) and `INTERVIEW-PREP.md`.
+- **Latency measured**: Vespa 5–37 ms; novel understood query ~2.5–4 s (LLM); exact repeat 0 ms; paraphrase ~24 ms (local e5).
 
 ## Roadmap / open decisions
 
-1. **Data realism** — mirror ezCater's *catering* catalog (platters/trays/serves-N/per-head price), grounded in real ingredients (Option A: reframe real recipes; Option B: LLM-generate on-brand catalog). *Decision pending.*
-2. **Real LLM ontology** (`build_ontology.py`) — LLM extracts ingredients + **infers** dietary/allergens (the tag-accuracy fix), optionally cross-referenced with Open Food Facts.
-3. **React query-understanding UI** — show extracted concepts + "filters you'd set" vs "what we understood."
-4. **Interview-prep doc** — Vespa pros/cons, two-tower/embeddings, LightGBM ranking, KG/ontology tech (Neo4j/RDF/GraphRAG), caching/latency, A/B + position bias.
-5. Optional v2: geo delivery-radius, ranking contexts, real-time availability.
+1. **Bigger real corpus** — HF unauthenticated streaming is slow (~6 docs/s); set `HF_TOKEN` or cache the parquet locally to feed tens of thousands of real recipes fast.
+2. **Real Redis + Open Food Facts live** — flip `REDIS_URL` + `OFF_LIVE=1` to demo the caching/corroboration story against real infra.
+3. **GBDT reranker** — add a LightGBM second-phase model in Vespa (learning-to-rank on synthetic order signals) to make the ranking-ML story runnable, not just narrated.
+4. **`datahive` HF profile** — richer real diet/cuisine labels (CC BY-NC) as an alternate `--dataset`.
+5. **Web PDF upload** — drag-and-drop a menu in the UI → vision-LLM parse → feed Vespa → searchable (currently ingestion is CLI-only via `run_ingest --source pdf`).
+6. Optional v2: geo delivery-radius, ranking contexts, real-time availability, query-time GraphRAG behind an "assistant" entry point.
