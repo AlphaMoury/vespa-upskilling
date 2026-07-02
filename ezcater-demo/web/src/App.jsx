@@ -452,8 +452,21 @@ function GraphExplorer() {
       borderWidth: anchor ? 0 : 1.5, borderWidthSelected: 3,
     }
   }
-  const toVisEdge = (e) => ({ id: `${e.from}->${e.to}`, from: e.from, to: e.to,
-    dashes: e.rel === 'CONFLICTS', color: { color: e.rel === 'FEATURES' ? '#17a08e' : e.rel === 'CONTAINS' ? '#c62828' : '#8a6d1a', opacity: 0.5 } })
+  const REL = {
+    FEATURES: { color: '#17a08e', dashes: false, label: 'features' },       // cuisine -> ingredient
+    MEMBER: { color: '#a15c00', dashes: false, label: 'is a' },             // ingredient -> category
+    CONTAINS: { color: '#c62828', dashes: true, label: 'contains' },        // ingredient -> allergen
+    CONFLICTS: { color: '#c62828', dashes: true, label: 'not allowed in' }, // ingredient -> diet it violates
+  }
+  const toVisEdge = (e) => {
+    const r = REL[e.rel] || { color: '#8a94a6', dashes: false, label: (e.rel || '').toLowerCase() }
+    return {
+      id: `${e.from}->${e.to}`, from: e.from, to: e.to,
+      arrows: { to: { enabled: true, scaleFactor: 0.55 } }, dashes: r.dashes, label: r.label,
+      font: { size: 11, color: '#6b7280', strokeWidth: 4, strokeColor: '#ffffff', align: 'middle' },
+      color: { color: r.color, opacity: 0.5, highlight: '#5b4b8a', hover: '#5b4b8a' },
+    }
+  }
 
   const expand = (id) => {
     const nodes = nodesDS.current, edges = edgesDS.current
