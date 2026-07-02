@@ -71,6 +71,8 @@ dish = Schema(
         Field(name="occasion", type="array<string>", indexing=["index", "attribute", "summary"]),
         Field(name="ingredients", type="array<string>", indexing=["index", "attribute", "summary"]),
         Field(name="allergens", type="array<string>", indexing=["attribute", "summary"]),
+        # provenance: which ingestion adapter produced this doc (synthetic|hf:*|pdf:*)
+        Field(name="source", type="string", indexing=["attribute", "summary"]),
         _gram("name"),
         _emb('input name . " " . input cuisine . " " . input description'),
     ]),

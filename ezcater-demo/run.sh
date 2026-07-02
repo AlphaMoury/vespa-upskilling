@@ -2,6 +2,8 @@
 # Launch the EzCater x Vespa demo.
 #   bash run.sh          -> if Vespa already has data, JUST start API + UI (fast, no re-feed)
 #   FRESH=1 bash run.sh  -> rebuild everything (deploy + re-feed all indexes; slow, ~40 min)
+#   INGEST=1 bash run.sh -> run the multi-source ingestion (synthetic + Food.com + menu PDFs)
+#                           into the dish index, then start API + UI
 # Requires Docker running + the capstone venv (../capstone/setup.sh).
 set -e
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -25,6 +27,15 @@ if [ "${FRESH:-0}" = "1" ] || [ "$N" -eq 0 ]; then
   ( cd "$ROOT" && "$PY" deploy_and_feed.py )
 else
   echo ">> Vespa already has data ($N dishes) — skipping deploy+feed. (FRESH=1 to rebuild.)"
+fi
+
+if [ "${INGEST:-0}" = "1" ]; then
+  echo ">> multi-source ingestion into the dish index (synthetic + Food.com + menu PDFs)..."
+  [ -f "$ROOT/menus/sample_catering_menu.pdf" ] || "$PY" "$ROOT/menus/make_sample_menu.py"
+  ( cd "$ROOT" \
+    && "$PY" -m ingest.run_ingest --source synthetic --deploy \
+    && LLM_INDEX=off "$PY" -m ingest.run_ingest --source hf --dataset foodcom --limit "${HF_N:-5000}" \
+    && "$PY" -m ingest.run_ingest --source pdf )
 fi
 
 echo ">> API   -> http://localhost:8009"
