@@ -102,6 +102,16 @@ class OntologyGraph:
             cnode = self._node(cuisine, "cuisine")
             for f in feats:
                 self._edge(cnode, self._node(f, "ingredient"), "FEATURES")
+        self.seed_categories()
+        return self
+
+    def seed_categories(self):
+        """Add positive-inclusion CATEGORY nodes (meat, seafood, …) with MEMBER edges to their
+        ingredients, so 'meat' is a real, navigable entity in the graph. Idempotent."""
+        for cat, members in _CATEGORY_EXPAND.items():
+            cnode = self._node(cat, "category")
+            for m in members:
+                self._edge(cnode, self._node(m, "ingredient"), "MEMBER")
         return self
 
     # ---------- growth (LLM, cached) ----------
@@ -209,7 +219,7 @@ class OntologyGraph:
         if path.is_file():
             try:
                 g = nx.node_link_graph(json.loads(path.read_text()), directed=True, edges="edges")
-                return cls(g)
+                return cls(g).seed_categories()  # ensure category nodes exist in older graphs
             except Exception:  # noqa: BLE001
                 pass
         return cls().seed_from_taxonomy()

@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 
 const API = 'http://localhost:8009'
-const KIND_COLOR = { cuisine: '#00695c', allergen: '#c62828', diet: '#2e7d32', ingredient: '#7c8698' }
+const KIND_COLOR = { cuisine: '#00695c', allergen: '#c62828', diet: '#2e7d32', category: '#a15c00', ingredient: '#7c8698' }
 
 const INDEXES = {
   dish: {
     label: 'Catering', icon: '🍽️', accent: '#e35205', unit: 'items',
-    placeholder: 'Try: an elegant Mediterranean spread to impress a client, nothing with nuts…',
-    examples: ['an elegant Mediterranean spread to impress a client, nothing with nuts', 'spicy vegan lunch for 15 under $20 a head', 'plant-based finger food with a kick, nut-free', 'office breakfast that travels well'],
+    placeholder: 'Ask in plain English — e.g. an elegant Mediterranean spread with meat, nothing with nuts…',
+    examples: ['an elegant Mediterranean spread with meat, nothing with nuts', 'spicy vegan lunch for 15 under $20 a head', 'nut-free dessert for a school event', 'office breakfast that travels well'],
     filters: true,
   },
   covid: {
@@ -158,8 +158,12 @@ function Concepts({ c, graph }) {
 // response (no dependency) — pill hubs, curved edges, gradients, soft shadows.
 function GraphView({ concepts, graph }) {
   const groups = []
-  if (concepts?.cuisine && graph?.added_terms?.length)
-    groups.push({ hub: concepts.cuisine, kind: 'cuisine', targets: graph.added_terms.slice(0, 8) })
+  const inc = graph?.include_terms || []
+  const cuisineTerms = (graph?.added_terms || []).filter((t) => !inc.includes(t))
+  if (concepts?.cuisine && cuisineTerms.length)
+    groups.push({ hub: concepts.cuisine, kind: 'cuisine', targets: cuisineTerms.slice(0, 8) })
+  if (inc.length)
+    groups.push({ hub: `with ${(concepts?.include || []).join(', ') || 'meat'}`, kind: 'category', targets: inc.slice(0, 8) })
   for (const [a, ings] of Object.entries(graph?.allergen_ingredients || {}))
     if (ings?.length) groups.push({ hub: `no ${a}`, kind: 'allergen', targets: ings.slice(0, 8) })
   if (!groups.length) return null
@@ -175,6 +179,7 @@ function GraphView({ concepts, graph }) {
         <defs>
           <linearGradient id="gvCuisine" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#17a08e" /><stop offset="1" stopColor="#00695c" /></linearGradient>
           <linearGradient id="gvAllergen" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#e35b5b" /><stop offset="1" stopColor="#c62828" /></linearGradient>
+          <linearGradient id="gvCategory" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#d08a2e" /><stop offset="1" stopColor="#a15c00" /></linearGradient>
           <filter id="gvShadow" x="-30%" y="-40%" width="160%" height="180%"><feDropShadow dx="0" dy="1.5" stdDeviation="2" floodColor="#0b1a2a" floodOpacity="0.16" /></filter>
         </defs>
         {groups.map((g, gi) => {
@@ -182,7 +187,7 @@ function GraphView({ concepts, graph }) {
           const hubW = Math.min(150, g.hub.length * CW + 34), hubH = 42
           const hubX = originX + 16, hubCY = padTop + ((g.targets.length - 1) * rowH) / 2 + 10
           const hubRight = hubX + hubW, tx = originX + 196
-          const grad = g.kind === 'cuisine' ? 'url(#gvCuisine)' : 'url(#gvAllergen)'
+          const grad = g.kind === 'cuisine' ? 'url(#gvCuisine)' : g.kind === 'category' ? 'url(#gvCategory)' : 'url(#gvAllergen)'
           return (
             <g key={gi}>
               {g.targets.map((t, ti) => {
@@ -558,6 +563,7 @@ function GraphExplorer() {
       </div>
       <div className="gexp-legend">
         <span><i style={{ background: KIND_COLOR.cuisine }} />cuisine</span>
+        <span><i style={{ background: KIND_COLOR.category }} />category</span>
         <span><i style={{ background: KIND_COLOR.allergen }} />allergen</span>
         <span><i style={{ background: KIND_COLOR.diet }} />diet</span>
         <span><i style={{ background: '#fff', borderColor: '#9aa0a6' }} />ingredient</span>
@@ -752,8 +758,12 @@ export default function App() {
       )}
 
       <div className="examples">
-        <span className="ex-lbl">try →</span>
-        {cfg.examples.map((e) => <button key={e} className="ex" onClick={() => run(e)}>{e}</button>)}
+        <span className="ex-lbl">Try</span>
+        {cfg.examples.map((e) => (
+          <button key={e} className="ex" onClick={() => run(e)}>
+            <span className="ex-ic">💬</span><span className="ex-tx">{e}</span>
+          </button>
+        ))}
         {count != null && <span className="idx-count">{count.toLocaleString()} {cfg.unit} indexed</span>}
       </div>
 

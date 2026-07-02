@@ -409,7 +409,7 @@ def graph_roots():
     if _get_graph is None:
         return {"nodes": [], "stats": {}}
     g = _get_graph().g
-    roots = [_gnode(n) for n, d in g.nodes(data=True) if d.get("kind") in ("cuisine", "allergen", "diet")]
+    roots = [_gnode(n) for n, d in g.nodes(data=True) if d.get("kind") in ("cuisine", "allergen", "diet", "category")]
     return {"nodes": roots, "stats": _get_graph().stats()}
 
 
