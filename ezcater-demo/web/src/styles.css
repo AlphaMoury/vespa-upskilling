@@ -217,6 +217,36 @@ mark.hl-sem{background:#bff0e2;color:inherit;border-radius:3px;padding:0 2px;fon
 .upload-transcript>summary::-webkit-details-marker,.llm-review>summary::-webkit-details-marker{display:none}
 .upload-transcript .stream-json,.llm-review .stream-json{margin-top:8px;max-height:260px}
 
+/* entity resolution — merge look-alike ingredient nodes (gamified graph cleanup) */
+.entres{background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,.03);overflow:hidden;margin-bottom:12px}
+.entres>.entres-sum{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;padding:11px 15px;font-weight:700;font-size:13.5px}
+.entres>.entres-sum::-webkit-details-marker{display:none}
+.entres-hint{font-weight:400;font-size:12px;color:var(--muted)}
+.entres-body{padding:4px 15px 15px}
+.entres-head{display:flex;align-items:center;gap:12px;font-size:12.5px;color:var(--muted);margin-bottom:10px}
+.entres-head span{flex:1}
+.entres-reload{flex:none;font-size:11.5px;font-weight:700;color:#5b4b8a;background:#5b4b8a10;border:1px solid #5b4b8a33;border-radius:999px;padding:4px 11px;cursor:pointer;transition:.14s}
+.entres-reload:hover:not(:disabled){background:#5b4b8a1c}
+.entres-reload:disabled{opacity:.5;cursor:progress}
+.entres-stat{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted);margin-bottom:10px}
+.entres-won{font-weight:800;color:#1f6f43;background:#e8f6ee;border:1px solid #bfe6cf;border-radius:999px;padding:2px 10px}
+.entres-clean{font-size:13px;color:#1f6f43;font-weight:600;padding:8px 0}
+.entres-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
+.entres-card{border:1px solid var(--line);border-radius:11px;padding:10px 12px;background:linear-gradient(180deg,#fbfcfe,#f6f8fc)}
+.entres-card.stream-in{animation:streamin .28s ease}
+.entres-keep-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.entres-keep{font-weight:800;font-size:13.5px;color:#5b4b8a;background:#5b4b8a12;border:1px solid #5b4b8a33;border-radius:8px;padding:3px 10px}
+.entres-keep::before{content:'canonical ';font-weight:700;font-size:9.5px;color:#5b4b8a99;text-transform:uppercase;letter-spacing:.06em;margin-right:5px}
+.entres-x{margin-left:auto;flex:none;font-size:11px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:999px;padding:2px 9px;cursor:pointer;transition:.14s}
+.entres-x:hover{color:#374151;border-color:#cdd3de;background:#fff}
+.entres-members{display:flex;flex-direction:column;gap:6px}
+.entres-cand{display:flex;align-items:center;gap:8px;font-size:12.5px;text-align:left;border:1px solid var(--line);border-radius:8px;padding:6px 10px;background:#fff;cursor:pointer;transition:.14s}
+.entres-cand:hover{border-color:var(--orange);background:#fff6f1;box-shadow:0 1px 3px rgba(227,82,5,.12)}
+.entres-cand-name{font-weight:600;color:var(--ink)}
+.entres-cand-diff{font-size:10.5px;font-weight:700;color:#b45309;background:#fef3c7;border:1px solid #fcd9a6;border-radius:999px;padding:1px 7px}
+.entres-cand-go{margin-left:auto;flex:none;font-size:11px;font-weight:800;color:var(--orange);opacity:0;transition:.14s}
+.entres-cand:hover .entres-cand-go{opacity:1}
+
 /* ontology graph explorer (vis-network) */
 .gexp{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 1px 3px rgba(0,0,0,.05);margin-bottom:16px;overflow:hidden}
 .gexp.full{position:fixed;inset:0;z-index:1000;margin:0;border-radius:0;display:flex;flex-direction:column;box-shadow:none}

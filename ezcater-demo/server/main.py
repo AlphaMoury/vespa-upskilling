@@ -414,6 +414,59 @@ def graph_roots():
     return {"nodes": roots, "stats": _get_graph().stats()}
 
 
+_MODIFIERS = {"fresh", "chopped", "ground", "dried", "minced", "whole", "large", "small", "medium",
+              "boneless", "skinless", "extra", "virgin", "organic", "cooked", "raw", "sliced",
+              "grated", "shredded", "frozen", "canned", "stem", "stems", "leaf", "leaves", "part",
+              "parts", "hot", "mild", "sweet", "unsalted", "salted", "low", "sodium", "lean", "ripe"}
+
+
+def _canon(name: str) -> str:
+    words = [w for w in re.findall(r"[a-z]+", (name or "").lower()) if w not in _MODIFIERS]
+    words = [w[:-1] if (w.endswith("s") and len(w) > 3) else w for w in words]  # depluralize
+    return " ".join(sorted(words))
+
+
+@app.get("/api/graph/dupes")
+def graph_dupes(limit: int = 15):
+    """Entity-resolution candidates: ingredient nodes that normalize to the same canonical
+    form (e.g. 'cilantro' / 'fresh cilantro' / 'fresh cilantro stems') — likely duplicates."""
+    if _get_graph is None:
+        return {"groups": [], "total_dupes": 0}
+    from collections import defaultdict
+    buckets = defaultdict(set)
+    for _, d in _get_graph().g.nodes(data=True):
+        if d.get("kind") == "ingredient":
+            buckets[_canon(d["name"])].add(d["name"])
+    groups = []
+    for canon, names in buckets.items():
+        if canon and len(names) > 1:
+            ordered = sorted(names, key=lambda x: (len(x), x))
+            groups.append({"keep": ordered[0], "members": ordered, "canon": canon})
+    groups.sort(key=lambda x: -len(x["members"]))
+    return {"groups": groups[:limit], "total_dupes": sum(len(x["members"]) - 1 for x in groups)}
+
+
+@app.post("/api/graph/merge")
+def graph_merge(keep: str = "", drop: str = ""):
+    """Merge the `drop` ingredient node into `keep`: redirect its edges, remove the node, persist."""
+    if _get_graph is None or not keep or not drop:
+        return {"ok": False, "error": "missing args"}
+    gobj = _get_graph()
+    g = gobj.g
+    kid, did = f"ingredient:{keep.lower().strip()}", f"ingredient:{drop.lower().strip()}"
+    if kid not in g or did not in g or kid == did:
+        return {"ok": False, "error": "node not found"}
+    for _, t, dd in list(g.out_edges(did, data=True)):
+        if t != kid:
+            g.add_edge(kid, t, **dd)
+    for s, _, dd in list(g.in_edges(did, data=True)):
+        if s != kid:
+            g.add_edge(s, kid, **dd)
+    g.remove_node(did)
+    gobj.save()
+    return {"ok": True, "merged": drop, "into": keep, "stats": gobj.stats()}
+
+
 @app.get("/api/graph/search")
 def graph_search(q: str = "", limit: int = 12):
     """Typeahead over graph node labels (any kind) for the explorer's search box."""

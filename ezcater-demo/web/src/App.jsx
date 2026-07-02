@@ -340,6 +340,91 @@ function UnderstandPanel({ concepts, graph, llmRaw }) {
 
 // Drag-and-drop a menu PDF -> STREAMS: rasterize -> vision transcribe -> per-item enrich +
 // index (with graph additions) live -> searchable.
+// Entity resolution — a small "gamified" pass over the ontology graph: the same real-world
+// ingredient often lands as several nodes ("basil", "fresh basil", "basil leaves"). We surface
+// look-alike clusters and let a human merge them (redirect edges, drop the duplicate) or keep
+// them apart. This is exactly the messy-catalog problem a search platform faces at ingest.
+function EntityResolution({ onDone }) {
+  const [groups, setGroups] = useState(null)
+  const [merged, setMerged] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const [total, setTotal] = useState(0)
+
+  const load = () => {
+    setBusy(true)
+    fetch(`${API}/api/graph/dupes?limit=40`).then((r) => r.json()).then((d) => {
+      setGroups(d.groups || []); setTotal(d.total_dupes || 0); setBusy(false)
+    }).catch(() => setBusy(false))
+  }
+
+  const merge = async (gi, member) => {
+    const g = groups[gi]
+    try {
+      const r = await fetch(`${API}/api/graph/merge?keep=${encodeURIComponent(g.keep)}&drop=${encodeURIComponent(member)}`, { method: 'POST' }).then((x) => x.json())
+      if (!r.ok) return
+      setMerged((m) => m + 1)
+      setGroups((gs) => {
+        const next = gs.slice()
+        const kept = next[gi].members.filter((m) => m !== member)
+        if (kept.length <= 1) next.splice(gi, 1)
+        else next[gi] = { ...next[gi], members: kept }
+        return next
+      })
+      onDone?.()
+    } catch { /* ignore */ }
+  }
+
+  const dismiss = (gi) => setGroups((gs) => gs.filter((_, i) => i !== gi))
+
+  const diff = (member, keep) => {
+    const kw = new Set(keep.toLowerCase().split(/\s+/))
+    return member.toLowerCase().split(/\s+/).filter((w) => !kw.has(w))
+  }
+
+  return (
+    <details className="entres" onToggle={(e) => { if (e.target.open && groups === null) load() }}>
+      <summary className="entres-sum">🧩 Entity resolution<span className="entres-hint">merge look-alike ingredient nodes — sharpen the graph</span></summary>
+      <div className="entres-body">
+        <div className="entres-head">
+          <span>The same ingredient lands as several nodes at ingest. Merge the look-alikes (edges are redirected) or keep them apart — your call.</span>
+          <button className="entres-reload" onClick={load} disabled={busy}>{busy ? '…' : '↻ rescan'}</button>
+        </div>
+        {groups !== null && (
+          <div className="entres-stat">
+            {merged > 0 && <span className="entres-won">✨ merged {merged}</span>}
+            <span>{groups.length} clusters · {total} redundant nodes to resolve</span>
+          </div>
+        )}
+        {groups !== null && groups.length === 0 && (
+          <div className="entres-clean">✓ graph is clean — no look-alike clusters left</div>
+        )}
+        <div className="entres-grid">
+          {(groups || []).map((g, gi) => (
+            <div key={g.canon} className="entres-card stream-in">
+              <div className="entres-keep-row">
+                <span className="entres-keep" title="the canonical node everything folds into">{g.keep}</span>
+                <button className="entres-x" title="keep all of these as separate ingredients" onClick={() => dismiss(gi)}>keep separate</button>
+              </div>
+              <div className="entres-members">
+                {g.members.filter((m) => m !== g.keep).map((m) => {
+                  const d = diff(m, g.keep)
+                  return (
+                    <button key={m} className="entres-cand" onClick={() => merge(gi, m)} title={`merge "${m}" into "${g.keep}"`}>
+                      <span className="entres-cand-name">{m}</span>
+                      {d.length > 0 && <span className="entres-cand-diff">+{d.join(' ')}</span>}
+                      <span className="entres-cand-go">⇢ merge</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </details>
+  )
+}
+
 function UploadMenu({ onDone }) {
   const [drag, setDrag] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -835,6 +920,7 @@ export default function App() {
               </button>
             </div>
             {showGraph && schema === 'dish' && <GraphExplorer />}
+            {schema === 'dish' && <EntityResolution onDone={refreshHealth} />}
             <UploadMenu onDone={refreshHealth} />
           </div>
         </details>
