@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 
 const API = 'http://localhost:8009'
+const KIND_COLOR = { cuisine: '#00695c', allergen: '#c62828', diet: '#2e7d32', ingredient: '#7c8698' }
 
 const INDEXES = {
   dish: {
@@ -53,20 +54,22 @@ function highlight(text, kw = [], sem = []) {
 }
 
 function Card({ hit, showScores, hl }) {
-  const pp = typeof hit.price_pp === 'number' && hit.price_pp > 0 ? `$${hit.price_pp.toFixed(2)}/head` : null
-  const total = typeof hit.price === 'number' && hit.price > 0 ? `$${Math.round(hit.price)} total` : null
+  const serves = typeof hit.serves === 'number' && hit.serves > 0 ? hit.serves : null
+  const total = typeof hit.price === 'number' && hit.price > 0 ? Math.round(hit.price) : null
+  const pp = typeof hit.price_pp === 'number' && hit.price_pp > 0 ? hit.price_pp.toFixed(2) : null
   const src = hit.source && SRC_LABEL[hit.source]
   const kw = hl?.kw || [], sem = hl?.sem || []
   return (
     <div className="card">
       <div className="card-top">
         <span className="dish">{highlight(hit.name, kw, sem)}</span>
-        {(pp || total) && <span className="price">{pp || total}</span>}
+        {total != null && <span className="price">${total}</span>}
       </div>
-      {(hit.sub || hit.tag || (pp && total)) && (
+      {(hit.sub || hit.tag || serves || pp) && (
         <div className="caterer">
           {hit.sub}{hit.tag ? <><span className="dot">·</span>{hit.tag}</> : null}
-          {pp && total ? <><span className="dot">·</span>{total}</> : null}
+          {serves ? <><span className="dot">·</span><span className="serves">Serves {serves}</span></> : null}
+          {pp ? <><span className="dot">·</span>${pp}/head</> : null}
         </div>
       )}
       {hit.desc && <div className="desc">{highlight(hit.desc, kw, sem)}</div>}
@@ -118,7 +121,7 @@ function Concepts({ c, graph }) {
   const hit = c.cache === 'hit'
   const added = graph?.added_terms || []
   const algIng = graph?.allergen_ingredients || {}
-  const bare = !c.dietary?.length && !c.exclude_allergens?.length && c.spice_min == null && !c.cuisine && !c.max_price_pp && !c.headcount
+  const bare = !c.dietary?.length && !c.include?.length && !c.exclude_allergens?.length && c.spice_min == null && !c.cuisine && !c.max_price_pp && !c.headcount
   return (
     <div className="concepts">
       <div className="cc-head">
@@ -129,6 +132,7 @@ function Concepts({ c, graph }) {
       </div>
       <div className="cc-chips">
         {(c.dietary || []).map((d) => <span key={d} className="cc-chip good">{d}</span>)}
+        {(c.include || []).map((x) => <span key={`i${x}`} className="cc-chip incl">with {x}</span>)}
         {(c.exclude_allergens || []).map((a) => <span key={a} className="cc-chip bad">no {a}</span>)}
         {c.spice_min != null && <span className="cc-chip hot">🌶 spice ≥ {c.spice_min}</span>}
         {c.cuisine && <span className="cc-chip">{c.cuisine}</span>}
@@ -293,11 +297,12 @@ function Pipeline({ q, understand, concepts, graph, runs }) {
 
 // Unified, collapsed-by-default container: the understood concepts + the ontology graph
 // live together here. A compact peek shows in the summary so you know what's inside.
-function UnderstandPanel({ concepts, graph }) {
+function UnderstandPanel({ concepts, graph, llmRaw }) {
   if (!concepts) return null
   const hit = concepts.cache === 'hit'
   const bits = [
     ...(concepts.dietary || []),
+    ...(concepts.include || []).map((x) => `with ${x}`),
     ...(concepts.exclude_allergens || []).map((a) => `no ${a}`),
     concepts.cuisine,
     concepts.spice_min != null ? `spice ≥ ${concepts.spice_min}` : null,
@@ -315,8 +320,251 @@ function UnderstandPanel({ concepts, graph }) {
       <div className="upanel-body">
         <Concepts c={concepts} graph={graph} />
         <GraphView concepts={concepts} graph={graph} />
+        {concepts.method === 'llm' && concepts.cache === 'miss' && llmRaw && (
+          <details className="llm-review">
+            <summary>📝 review what the LLM generated (raw output)</summary>
+            <pre className="stream-json">{llmRaw}</pre>
+          </details>
+        )}
       </div>
     </details>
+  )
+}
+
+// Drag-and-drop a menu PDF -> STREAMS: rasterize -> vision transcribe -> per-item enrich +
+// index (with graph additions) live -> searchable.
+function UploadMenu({ onDone }) {
+  const [drag, setDrag] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState('')
+  const [transcript, setTranscript] = useState('')
+  const [items, setItems] = useState([])
+  const [result, setResult] = useState(null)
+  const inputRef = useRef(null)
+
+  const send = async (files) => {
+    const f = files?.[0]
+    if (!f) return
+    if (!f.name.toLowerCase().endsWith('.pdf')) { setResult({ ok: false, error: 'Please choose a .pdf file' }); return }
+    setBusy(true); setResult(null); setStatus('uploading…'); setItems([]); setTranscript('')
+    const live = []; let tx = ''
+    try {
+      const fd = new FormData(); fd.append('file', f)
+      const resp = await fetch(`${API}/api/upload_pdf`, { method: 'POST', body: fd })
+      const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = ''
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += dec.decode(value, { stream: true })
+        const parts = buf.split('\n\n'); buf = parts.pop()
+        for (const p of parts) {
+          const line = p.trim(); if (!line.startsWith('data:')) continue
+          let m; try { m = JSON.parse(line.slice(5)) } catch { continue }
+          if (m.type === 'token') { tx += m.text; setTranscript(tx) }
+          else if (m.type === 'status') setStatus(m.msg)
+          else if (m.type === 'item') { live.push(m); setItems([...live]) }
+          else if (m.type === 'done') { setResult({ ok: true, ...m }); setBusy(false); onDone?.() }
+          else if (m.type === 'error') { setResult({ ok: false, error: m.error }); setBusy(false) }
+        }
+      }
+    } catch (e) { setResult({ ok: false, error: String(e) }); setBusy(false) }
+  }
+
+  return (
+    <details className="upload">
+      <summary className="upload-sum">📄 Add a menu (PDF)<span className="upload-hint">upload → a vision-LLM transcribes it → instantly searchable</span></summary>
+      <div className="upload-body">
+        <div className={`dropzone ${drag ? 'drag' : ''} ${busy ? 'busy' : ''}`}
+          onDragOver={(e) => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)}
+          onDrop={(e) => { e.preventDefault(); setDrag(false); send(e.dataTransfer.files) }}
+          onClick={() => !busy && inputRef.current?.click()}>
+          <input ref={inputRef} type="file" accept="application/pdf,.pdf" hidden onChange={(e) => send(e.target.files)} />
+          {busy ? <span className="drop-busy">🧠 {status || 'processing…'}</span>
+            : <span>Drag a menu PDF here, or <b>click to choose</b></span>}
+        </div>
+        {busy && transcript && (
+          <div className="stream-box">
+            <div className="stream-lbl">🧠 vision-LLM transcribing the menu…</div>
+            <pre className="stream-json">{transcript}<span className="stream-cursor">▍</span></pre>
+          </div>
+        )}
+        {!busy && transcript && (
+          <details className="upload-transcript">
+            <summary>📝 review the vision-LLM transcript</summary>
+            <pre className="stream-json">{transcript}</pre>
+          </details>
+        )}
+        {result?.ok && (
+          <div className="upload-ok-h">✓ Parsed <b>{result.count}</b> items from <b>{result.caterer || 'your menu'}</b> <span className="upload-method">{result.method}</span> · fed {result.fed} → now searchable</div>
+        )}
+        {result && !result.ok && <div className="upload-err">✕ {result.error}</div>}
+        {items.length > 0 && (
+          <div className="upload-items">
+            {items.map((it, i) => (
+              <div key={i} className="upload-item stream-in">
+                <span className="ui-name">{it.name}</span>
+                {typeof it.price === 'number' && it.price > 0 && <span className="ui-price">${Math.round(it.price)}</span>}
+                {it.serves ? <span className="ui-serves">serves {it.serves}</span> : null}
+                {it.graph_added > 0 && <span className="ui-graph" title="new ingredients this item added to the ontology graph">⛓ +{it.graph_added}</span>}
+                {it.confidence < 0.7 && <span className="ui-flag" title="low confidence — flagged for review">review</span>}
+                {(it.allergens || []).length > 0 && <span className="ui-alg">⚠ {it.allergens.join(' · ')}</span>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </details>
+  )
+}
+
+// Interactive ontology graph: start from anchors (cuisines/allergens/diets), click a node
+// to expand its neighbors, click again to collapse. Backed by vis-network.
+function GraphExplorer() {
+  const boxRef = useRef(null)
+  const net = useRef(null)
+  const nodesDS = useRef(null)
+  const edgesDS = useRef(null)
+  const expanded = useRef(new Set())
+  const [stats, setStats] = useState(null)
+  const [full, setFull] = useState(false)
+  const [sq, setSq] = useState('')
+  const [sugg, setSugg] = useState([])
+
+  const toVisNode = (n) => {
+    const anchor = n.kind !== 'ingredient'
+    const c = KIND_COLOR[n.kind] || '#9aa0a6'
+    return {
+      id: n.id, label: n.label, _anchor: anchor,
+      shape: 'box', margin: anchor ? 12 : 8, shapeProperties: { borderRadius: anchor ? 20 : 11 },
+      color: {
+        background: anchor ? c : '#ffffff', border: c,
+        highlight: { background: anchor ? c : '#eef7f4', border: c },
+        hover: { background: anchor ? c : '#f3f8f7', border: c },
+      },
+      font: { color: anchor ? '#ffffff' : '#2b3440', size: anchor ? 18 : 14, face: 'Inter, system-ui, sans-serif' },
+      borderWidth: anchor ? 0 : 1.5, borderWidthSelected: 3,
+    }
+  }
+  const toVisEdge = (e) => ({ id: `${e.from}->${e.to}`, from: e.from, to: e.to,
+    dashes: e.rel === 'CONFLICTS', color: { color: e.rel === 'FEATURES' ? '#17a08e' : e.rel === 'CONTAINS' ? '#c62828' : '#8a6d1a', opacity: 0.5 } })
+
+  const expand = (id) => {
+    const nodes = nodesDS.current, edges = edgesDS.current
+    if (!nodes || expanded.current.has(id)) return null
+    expanded.current.add(id)
+    return fetch(`${API}/api/graph/neighbors?node=${encodeURIComponent(id)}`).then((r) => r.json()).then((d) => {
+      nodes.update((d.nodes || []).map(toVisNode)); edges.update((d.edges || []).map(toVisEdge))
+    }).catch(() => {})
+  }
+  const collapse = (id) => {
+    const nodes = nodesDS.current, edges = edgesDS.current
+    expanded.current.delete(id)
+    const nbrs = edges.get().filter((e) => e.from === id || e.to === id).map((e) => (e.from === id ? e.to : e.from))
+    nbrs.forEach((nid) => {
+      const nd = nodes.get(nid)
+      if (!nd || nd._anchor || expanded.current.has(nid)) return
+      if (edges.get().filter((e) => e.from === nid || e.to === nid).length <= 1) nodes.remove(nid)
+    })
+    const present = new Set(nodes.getIds())
+    edges.remove(edges.get().filter((e) => !present.has(e.from) || !present.has(e.to)).map((e) => e.id))
+  }
+  const toggle = (id) => (expanded.current.has(id) ? collapse(id) : expand(id))
+
+  useEffect(() => {
+    let dead = false
+    import('vis-network/standalone').then(({ Network, DataSet }) => {
+      if (dead || !boxRef.current) return
+      const nodes = new DataSet([]), edges = new DataSet([])
+      nodesDS.current = nodes; edgesDS.current = edges
+      net.current = new Network(boxRef.current, { nodes, edges }, {
+        autoResize: true,
+        physics: {
+          solver: 'barnesHut',
+          barnesHut: { gravitationalConstant: -8500, centralGravity: 0.22, springLength: 150, springConstant: 0.035, damping: 0.55, avoidOverlap: 0.5 },
+          stabilization: { enabled: true, iterations: 200, updateInterval: 25 },
+        },
+        interaction: { hover: true, tooltipDelay: 100, zoomView: true, dragView: true, dragNodes: true },
+        nodes: { shadow: { enabled: true, size: 6, x: 0, y: 2, color: 'rgba(15,23,41,0.14)' } },
+        edges: { smooth: { enabled: true, type: 'dynamic' }, width: 1.6, hoverWidth: 0.8 },
+      })
+      net.current.on('click', (p) => { if (p.nodes.length) toggle(p.nodes[0]) })
+      fetch(`${API}/api/graph/roots`).then((r) => r.json()).then((d) => {
+        nodes.add((d.nodes || []).map(toVisNode)); setStats(d.stats)
+        setTimeout(() => net.current?.fit?.({ animation: { duration: 500 } }), 300)
+      }).catch(() => {})
+    })
+    return () => { dead = true; net.current?.destroy?.() }
+  }, [])
+
+  // typeahead search over all graph nodes
+  useEffect(() => {
+    if (!sq.trim()) { setSugg([]); return }
+    const t = setTimeout(() => {
+      fetch(`${API}/api/graph/search?q=${encodeURIComponent(sq)}`).then((r) => r.json())
+        .then((d) => setSugg(d.nodes || [])).catch(() => setSugg([]))
+    }, 130)
+    return () => clearTimeout(t)
+  }, [sq])
+
+  // force vis-network to recompute its canvas size when entering/leaving fullscreen, + Escape
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') setFull(false) }
+    window.addEventListener('keydown', onKey)
+    const resize = () => { try { net.current?.setSize?.('100%', '100%'); net.current?.redraw?.(); net.current?.fit?.({ animation: { duration: 350 } }) } catch { /* noop */ } }
+    const t1 = setTimeout(resize, 80)
+    const t2 = setTimeout(resize, 320)   // second pass after layout settles
+    return () => { window.removeEventListener('keydown', onKey); clearTimeout(t1); clearTimeout(t2) }
+  }, [full])
+
+  const focusNode = (n) => {
+    const nodes = nodesDS.current
+    if (!nodes) return
+    if (!nodes.get(n.id)) nodes.add(toVisNode(n))
+    const done = () => { net.current?.selectNodes?.([n.id]); net.current?.focus?.(n.id, { scale: 1.1, animation: { duration: 600 } }) }
+    if (!expanded.current.has(n.id)) { const p = expand(n.id); (p && p.then ? p : Promise.resolve()).then(() => setTimeout(done, 80)) }
+    else setTimeout(done, 20)
+    setSq(''); setSugg([])
+  }
+  const reset = () => {
+    const nodes = nodesDS.current, edges = edgesDS.current
+    if (!nodes) return
+    expanded.current = new Set(); edges.clear(); nodes.clear()
+    fetch(`${API}/api/graph/roots`).then((r) => r.json()).then((d) => {
+      nodes.add((d.nodes || []).map(toVisNode)); setTimeout(() => net.current?.fit?.({ animation: { duration: 400 } }), 200)
+    })
+  }
+
+  return (
+    <div className={`gexp ${full ? 'full' : ''}`}>
+      <div className="gexp-bar">
+        <span className="gexp-title">🕸 Ontology graph</span>
+        <div className="gexp-search">
+          <input value={sq} onChange={(e) => setSq(e.target.value)} placeholder="search a node — tahini, nuts, Italian…"
+            onBlur={() => setTimeout(() => setSugg([]), 150)} />
+          {sugg.length > 0 && (
+            <div className="gexp-sugg">
+              {sugg.map((n) => (
+                <div key={n.id} className="gexp-sg" onMouseDown={() => focusNode(n)}>
+                  <i style={{ background: KIND_COLOR[n.kind] || '#9aa0a6' }} /><span>{n.label}</span><em>{n.kind}</em>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <button className="gexp-btn" onClick={() => net.current?.fit?.({ animation: { duration: 400 } })} title="fit to view">⤢ fit</button>
+        <button className="gexp-btn" onClick={reset} title="reset to anchors">↺ reset</button>
+        <button className="gexp-btn" onClick={() => setFull((v) => !v)}>{full ? '✕ exit' : '⛶ fullscreen'}</button>
+        {stats && <span className="gexp-stats">{stats.ingredient} ingredients · {stats.cuisine} cuisines · {stats.allergen} allergens · {stats.edges} edges</span>}
+      </div>
+      <div className="gexp-legend">
+        <span><i style={{ background: KIND_COLOR.cuisine }} />cuisine</span>
+        <span><i style={{ background: KIND_COLOR.allergen }} />allergen</span>
+        <span><i style={{ background: KIND_COLOR.diet }} />diet</span>
+        <span><i style={{ background: '#fff', borderColor: '#9aa0a6' }} />ingredient</span>
+        <span className="gexp-tip">click a node to expand · click again to collapse</span>
+      </div>
+      <div ref={boxRef} className="gexp-canvas" />
+    </div>
   )
 }
 
@@ -336,17 +584,19 @@ export default function App() {
   const [maxprice, setMaxprice] = useState('')
   const [source, setSource] = useState('')
   const [understand, setUnderstand] = useState(false)
+  const [showGraph, setShowGraph] = useState(false)
   const cfg = INDEXES[schema]
 
-  useEffect(() => {
-    const load = () => {
-      fetch(`${API}/api/health`).then((r) => r.json()).then(setHealth).catch(() => { })
-      fetch(`${API}/api/sources?schema=dish`).then((r) => r.json()).then((d) => setSourceOpts(d.sources || {})).catch(() => { })
-    }
-    load()
-    const id = setInterval(load, 5000)
-    return () => clearInterval(id)
+  const refreshHealth = useCallback(() => {
+    fetch(`${API}/api/health`).then((r) => r.json()).then(setHealth).catch(() => { })
+    fetch(`${API}/api/sources?schema=dish`).then((r) => r.json()).then((d) => setSourceOpts(d.sources || {})).catch(() => { })
   }, [])
+
+  useEffect(() => {
+    refreshHealth()
+    const id = setInterval(refreshHealth, 5000)
+    return () => clearInterval(id)
+  }, [refreshHealth])
 
   useEffect(() => {
     if (!q.trim()) { setSugg([]); return }
@@ -507,12 +757,14 @@ export default function App() {
         {count != null && <span className="idx-count">{count.toLocaleString()} {cfg.unit} indexed</span>}
       </div>
 
-      {understand && schema === 'dish' && concepts && <UnderstandPanel concepts={concepts} graph={graph} />}
+      {/* 1) reasoning first: what was understood + how the search works (above results, as before) */}
+      {understand && schema === 'dish' && concepts && <UnderstandPanel concepts={concepts} graph={graph} llmRaw={cols.find((c) => c.key === 'understood')?.stream} />}
       {cols.some((c) => c.resp) && (
         <Pipeline q={lastQ} understand={understand && schema === 'dish'} concepts={concepts} graph={graph}
           runs={cols.map((c) => ({ label: c.title, accent: c.accentKind === 'hero' ? 'orange' : 'muted', resp: c.resp }))} />
       )}
 
+      {/* 2) the searches (results) */}
       {cols.length > 0 && (
         <>
           <div className="hl-legend">
@@ -534,6 +786,22 @@ export default function App() {
             })}
           </div>
         </>
+      )}
+
+      {/* 3) everything else, LAST, behind a collapsible "More" */}
+      {cfg.filters && (
+        <details className="more">
+          <summary className="more-sum">✨ More<span className="more-hint">explore the ontology graph · upload a menu</span></summary>
+          <div className="more-body">
+            <div className="tools">
+              <button className={`tool-btn ${showGraph ? 'on' : ''}`} onClick={() => setShowGraph((v) => !v)}>
+                🕸 {showGraph ? 'Hide' : 'Explore'} the ontology graph{health?.graph ? ` (${health.graph.ingredient} ingredients)` : ''}
+              </button>
+            </div>
+            {showGraph && schema === 'dish' && <GraphExplorer />}
+            <UploadMenu onDone={refreshHealth} />
+          </div>
+        </details>
       )}
 
       <footer className="ftr">One Vespa engine · three indexes · multi-source ingestion (sample catalog · Food.com recipes · menu PDFs) → one schema → hybrid BM25 ⊕ e5 vectors (RRF). Allergens/diet are index-time enriched; excluded as hard filters.</footer>
