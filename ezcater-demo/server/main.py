@@ -170,7 +170,8 @@ def _sse(obj) -> str:
 
 
 @app.get("/api/understand_stream")
-def understand_stream(q: str = "", hits: int = 8, source: str = ""):
+def understand_stream(q: str = "", hits: int = 8, source: str = "",
+                      cuisine: str = "", dietary: str = "", maxprice: str = ""):
     """Server-Sent Events for the 'understood' column, in one call so understanding runs ONCE:
       token   events  — the LLM generating concepts live (only on a cache miss)
       cached  event   — concepts served from cache instantly (no generation)
@@ -220,7 +221,7 @@ def understand_stream(q: str = "", hits: int = 8, source: str = ""):
         understand_ms = round((time.perf_counter() - t0) * 1000, 1)
         # --- 2) run the hybrid Vespa search and stream the results back ---
         try:
-            r = _understood_run(concepts, hits, source)
+            r = _understood_run(concepts, hits, source, extra=_facet_filter("dish", cuisine, dietary, maxprice))
             yield _sse({"type": "results", "concepts": concepts, "hits": r["hits"], "graph": r["graph"],
                         "applied_filters": r["applied_filters"], "debug": r["debug"], "total": r["total"],
                         "timing": {"total_ms": round((time.perf_counter() - t0) * 1000, 1),
@@ -502,7 +503,7 @@ def _facet_filter(schema: str, cuisine: str = "", dietary: str = "", maxprice: s
     return "".join(" and " + p for p in parts)
 
 
-def _understood_yql(c, hits, source="", include_terms=None):
+def _understood_yql(c, hits, source="", include_terms=None, extra=""):
     # HARD filters = genuine, EXPLICIT constraints (dietary, allergen exclusions, spice, budget,
     # and 'with X' inclusions). Cuisine is deliberately NOT a hard filter: it's often INFERRED
     # from a dish name, and filtering on it would drop an exact BM25 match (e.g. "Smoked Brisket
@@ -520,18 +521,23 @@ def _understood_yql(c, hits, source="", include_terms=None):
         ors = " or ".join(f'ingredients contains "{t}"' for t in sorted(set(include_terms)))
         filt.append(f"({ors})")
     where = "(userQuery() or ({targetHits:200}nearestNeighbor(embedding,q)))" + "".join(" and " + f for f in filt)
-    where += _src_filter(source, "dish")
+    where += _src_filter(source, "dish") + (extra or "")   # extra = manual UI facet filters
+    for clause in (extra or "").split(" and "):            # surface manual facets in applied_filters too
+        c2 = clause.strip()
+        if c2 and c2 not in filt:
+            filt.append(c2)
     return f"select * from dish where {where} limit {hits}", filt
 
 
-def _understood_run(concepts: dict, hits: int, source: str = "") -> dict:
+def _understood_run(concepts: dict, hits: int, source: str = "", extra: str = "") -> dict:
     """Given already-understood concepts, expand via the graph + run the hybrid Vespa query.
+    `extra` carries the manual UI facet filters so they COMBINE with the understood constraints.
     Shared by /api/search (mode=understood) and the streaming endpoint so understanding runs once."""
     fetch = hits * 8
     graph = _graph_expand(concepts)
     free = concepts.get("free_text") or ""
     vec_text = (free + " " + " ".join(graph.get("added_terms", []))).strip()
-    yql, applied = _understood_yql(concepts, fetch, source, include_terms=graph.get("include_terms"))
+    yql, applied = _understood_yql(concepts, fetch, source, include_terms=graph.get("include_terms"), extra=extra)
     params = {"yql": yql, "query": free, "ranking": "hybrid", "input.query(q)": _emb(vec_text or free)}
     _tv = time.perf_counter()
     resp = _vespa(params)
@@ -554,7 +560,7 @@ def search(q: str = "", mode: str = "hybrid", schema: str = "dish", hits: int = 
         concepts = understand(q)
         understand_ms = round((time.perf_counter() - _tu) * 1000, 1)
         try:
-            r = _understood_run(concepts, hits, source)
+            r = _understood_run(concepts, hits, source, extra=_facet_filter(schema, cuisine, dietary, maxprice))
             return {"mode": mode, "hits": r["hits"], "concepts": concepts, "applied_filters": r["applied_filters"],
                     "graph": r["graph"], "debug": r["debug"],
                     "timing": {"total_ms": round((time.perf_counter() - t_start) * 1000, 1),

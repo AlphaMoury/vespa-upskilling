@@ -49,15 +49,19 @@ body{margin:0;background:var(--bg);color:var(--ink);
 .sg-name{font-weight:600}
 .sg-cui{font-size:12px;color:var(--muted)}
 
-/* examples — suggested questions */
-.examples{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:24px}
-.ex-lbl{font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-right:2px}
-.ex{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:12px;
-  padding:8px 13px;font-size:13px;color:#374151;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.04);transition:.15s}
+/* examples — suggested questions (single elegant scrolling row) */
+.examples{display:flex;align-items:center;gap:12px;margin-bottom:24px}
+.ex-lbl{flex:none;font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.ex-scroll{display:flex;gap:9px;flex:1;overflow-x:auto;padding:2px 2px 4px;scrollbar-width:thin;scroll-behavior:smooth}
+.ex-scroll::-webkit-scrollbar{height:5px}
+.ex-scroll::-webkit-scrollbar-thumb{background:#d7dbe2;border-radius:3px}
+.ex-scroll::-webkit-scrollbar-track{background:transparent}
+.ex{flex:none;display:inline-flex;align-items:center;gap:8px;white-space:nowrap;background:#fff;border:1px solid var(--line);
+  border-radius:12px;padding:8px 14px;font-size:13px;color:#374151;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.04);transition:.15s}
 .ex:hover{border-color:var(--orange);color:var(--orange);box-shadow:0 4px 12px rgba(227,82,5,.15);transform:translateY(-1px)}
 .ex-ic{font-size:12px;opacity:.6;transition:.15s}
 .ex:hover .ex-ic{opacity:1;transform:scale(1.1)}
-.ex-tx{line-height:1.2}
+.idx-count{flex:none}
 
 /* keyword / semantic highlighting in results */
 mark.hl-kw{background:#ffe89a;color:inherit;border-radius:3px;padding:0 2px;font-weight:600}

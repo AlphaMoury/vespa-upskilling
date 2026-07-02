@@ -262,7 +262,9 @@ function Pipeline({ q, understand, concepts, graph, runs }) {
             <div className="pipe-desc">
               The model reads the free-text query and returns structured search concepts.{' '}
               {hit
-                ? <>This one was <b>reused from the semantic cache</b> (cosine sim {concepts._sim}) — <b>no LLM call</b>.</>
+                ? (concepts._cache === 'exact'
+                  ? <>This exact query was <b>reused from the cache</b> instantly — <b>no LLM call</b>.</>
+                  : <>This paraphrase was <b>reused from the semantic cache</b>{concepts._sim ? ` (cosine sim ${concepts._sim})` : ''} — <b>no LLM call</b>.</>)
                 : <>The result is cached by intent embedding, so paraphrases reuse it — one LLM call per intent.</>}
             </div>
             <pre className="pipe-json">{JSON.stringify(prettyConcepts(concepts), null, 2)}</pre>
@@ -641,7 +643,7 @@ export default function App() {
 
       if (s.key === 'understood') {
         // one stream: tokens live → concepts → results (understanding + search run once, server-side)
-        const es = new EventSource(`${API}/api/understand_stream?q=${encodeURIComponent(term)}&hits=8${sp}`)
+        const es = new EventSource(`${API}/api/understand_stream?q=${encodeURIComponent(term)}&hits=8${sp}${fp}`)
         let closed = false
         es.onmessage = (ev) => {
           let m; try { m = JSON.parse(ev.data) } catch { return }
@@ -759,11 +761,13 @@ export default function App() {
 
       <div className="examples">
         <span className="ex-lbl">Try</span>
-        {cfg.examples.map((e) => (
-          <button key={e} className="ex" onClick={() => run(e)}>
-            <span className="ex-ic">💬</span><span className="ex-tx">{e}</span>
-          </button>
-        ))}
+        <div className="ex-scroll">
+          {cfg.examples.map((e) => (
+            <button key={e} className="ex" onClick={() => run(e)}>
+              <span className="ex-ic">💬</span><span className="ex-tx">{e}</span>
+            </button>
+          ))}
+        </div>
         {count != null && <span className="idx-count">{count.toLocaleString()} {cfg.unit} indexed</span>}
       </div>
 
