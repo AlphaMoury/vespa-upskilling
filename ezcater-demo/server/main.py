@@ -115,7 +115,9 @@ _UNDERSTAND_SYS = (
     "specific dish like 'smoked brisket sliders'), "
     "occasion (array of: client,impressive,healthy,light,comfort,celebration,morning), "
     "include (array of ingredients/protein categories the user explicitly WANTS present, e.g. "
-    "['meat'] for 'with meat', ['chicken'] for 'with chicken' — empty unless clearly requested), "
+    "['meat'] for 'with meat', ['chicken'] for 'with chicken' — empty unless clearly requested; "
+    "NEVER put a NEGATED item here: 'no meat' / 'without chicken' / 'meat-free' / 'hold the cheese' "
+    "are EXCLUSIONS, not includes. Map 'no meat' / 'meatless' / 'no animal' to dietary ['vegetarian']), "
     "max_price_pp (number or null, per-person budget), headcount (int or null)."
 )
 

@@ -34,16 +34,32 @@ _GUARD_SYN = {"nuts": "nut", "peanut": "nut", "peanuts": "nut", "eggs": "egg", "
               "beef": "meat", "chicken": "meat", "pork": "meat", "lamb": "meat", "turkey": "meat",
               "poultry": "meat", "bacon": "meat", "sausage": "meat", "carne": "meat", "brisket": "meat",
               "seafood": "fish", "shrimp": "shellfish"}
+# Negation cues that FLIP a nearby content word's polarity. Without this, "with meat" and
+# "with NO meat" collapse to the same signature {meat} and the cache serves the opposite
+# intent (the exact bug: a "no meat" query reusing a cached "with meat" answer).
+_NEG = {"no", "not", "without", "nothing", "sans", "hold", "minus", "exclude",
+        "excluding", "avoid", "skip", "never", "non", "none", "anti"}
 
 
 def _guard_tokens(text: str) -> frozenset:
-    s = set()
-    for w in re.findall(r"[a-z]+", (text or "").lower()):
+    """Intent signature that must match for a semantic cache hit. Captures the INTENT-FLIPPING
+    content words (diet/protein/allergen) AND their POLARITY, so 'with meat' ({meat}) never
+    collides with 'no meat' ({!meat}). A negation cue in the 3 words before a token, or a
+    trailing 'free' ('gluten free', 'nut-free'), marks that token as excluded."""
+    words = re.findall(r"[a-z]+", (text or "").lower())
+    concept = []                       # per-position guard concept (or None)
+    for w in words:
         w = _GUARD_SYN.get(w, w)
         if w.endswith("s") and w[:-1] in _GUARD_VOCAB:
             w = w[:-1]
-        if w in _GUARD_VOCAB:
-            s.add(w)
+        concept.append(w if w in _GUARD_VOCAB else None)
+    s = set()
+    for i, c in enumerate(concept):
+        if c is None:
+            continue
+        neg = any(words[j] in _NEG for j in range(max(0, i - 3), i))                       # "no meat"
+        neg = neg or any(words[j] == "free" for j in range(i + 1, min(len(words), i + 3)))  # "gluten free"
+        s.add(("!" if neg else "") + c)
     for n in re.findall(r"\d+", text or ""):   # numbers flip intent too (headcount "for 25", budget "$20")
         s.add("#" + n)
     return frozenset(s)
