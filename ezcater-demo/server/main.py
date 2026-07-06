@@ -85,16 +85,24 @@ def understand_heuristic(q: str) -> dict:
             excl.append(a)
     if ("nut free" in t or "nut-free" in t) and "nuts" not in excl:
         excl.append("nuts")
-    spice = 2 if ("spicy" in t or "hot " in t) else None
+    # spice only when actually requested: guard against "not spicy"/"mild", and don't fire
+    # on "hot dogs" (substring) — require the word "spicy"/"fiery" or "hot sauce"
+    neg_spice = ("mild" in t) or bool(re.search(r"\b(?:not|non|no|less|without|zero)\b\W+(?:\w+\W+){0,2}spic", t))
+    spice = 2 if (not neg_spice and (re.search(r"\bspic(?:y|ier)\b", t) or "hot sauce" in t or "fiery" in t)) else None
     cuisine = next((c.capitalize() for c in CUISINE_VOCAB if c in t), None)
     occ = [v for k, v in OCCASION.items() if k in t]
     occ = list(dict.fromkeys(occ))
     mp = None
-    m = re.search(r"(?:under|below|less than|<|max)\s*\$?\s*(\d+)", t) or re.search(r"\$\s*(\d+)\s*(?:/|per|a)\s*(?:head|person|pp)", t)
+    # a budget is MONEY — don't let "under 15 people" read as a $15 cap (negative lookahead on group nouns)
+    _people = r"people|persons?|guests?|pax|heads?|attendees?|folks|of us"
+    m = re.search(rf"(?:under|below|less than|<|max)\s*\$?\s*\b(\d+)\b(?!\s*(?:{_people}))", t) or re.search(r"\$\s*(\d+)\s*(?:/|per|a)\s*(?:head|person|pp)", t)
     if m:
         mp = float(m.group(1))
     hc = None
-    m2 = re.search(r"(?:for|party of|team of|group of)\s+(\d+)", t) or re.search(r"(\d+)\s*(?:people|persons|guests|pax)", t)
+    # headcount is a number of PEOPLE — prefer an explicit group noun, and never read a
+    # duration/time/price as a headcount ("for 2 hours", "for 30 minutes", "for 20 bucks")
+    _units = r"hours?|hrs?|days?|minutes?|mins?|weeks?|months?|am|pm|dollars?|bucks?|percent|%|/"
+    m2 = re.search(rf"\b(\d+)\s*(?:{_people})", t) or re.search(rf"(?:for|party of|team of|group of)\s+\b(\d+)\b(?!\s*(?:{_units}))", t)
     if m2:
         hc = int(m2.group(1))
     inc = []
@@ -118,7 +126,9 @@ _UNDERSTAND_SYS = (
     "['meat'] for 'with meat', ['chicken'] for 'with chicken' — empty unless clearly requested; "
     "NEVER put a NEGATED item here: 'no meat' / 'without chicken' / 'meat-free' / 'hold the cheese' "
     "are EXCLUSIONS, not includes. Map 'no meat' / 'meatless' / 'no animal' to dietary ['vegetarian']), "
-    "max_price_pp (number or null, per-person budget), headcount (int or null)."
+    "max_price_pp (number or null, per-person budget — a MONEY amount, not a group size), "
+    "headcount (int or null — the number of PEOPLE to feed; NEVER a duration/time like "
+    "'2 hours', a date, or a price)."
 )
 
 
@@ -135,10 +145,12 @@ def understand_llm(q: str) -> dict:
         return understand_heuristic(q)
     data["free_text"] = data.get("free_text") or q
     data["method"] = "llm"
-    # backfill anything the LLM omitted with the heuristic (belt and suspenders)
+    # backfill only keys the LLM OMITTED entirely — never override a value it returned,
+    # including a deliberate null/[]. (Overriding turned "not spicy" -> spice_min 2 and
+    # "americano" -> cuisine American via the substring heuristic.)
     h = understand_heuristic(q)
     for k in ("dietary", "exclude_allergens", "cuisine", "occasion", "include", "max_price_pp", "headcount", "spice_min"):
-        if not data.get(k):
+        if k not in data:
             data[k] = h.get(k)
     return data
 
@@ -215,7 +227,7 @@ def understand_stream(q: str = "", hits: int = 8, source: str = "",
                 concepts["cache"] = "miss"
                 h = understand_heuristic(q)
                 for k in ("dietary", "exclude_allergens", "cuisine", "occasion", "include", "max_price_pp", "headcount", "spice_min"):
-                    if not concepts.get(k):
+                    if k not in concepts:  # backfill omitted keys only; respect deliberate LLM null/[]
                         concepts[k] = h.get(k)
                 if ingest_semcache is not None:
                     ingest_semcache.put(q, {k: v for k, v in concepts.items() if not str(k).startswith("_")})
@@ -573,7 +585,7 @@ def _understood_yql(c, hits, source="", include_terms=None, extra=""):
         filt.append(f'dietary contains "{d}"')
     for a in c.get("exclude_allergens") or []:
         filt.append(f'!(allergens contains "{a}")')
-    if c.get("spice_min") is not None:
+    if c.get("spice_min"):  # 0 ("not spicy") is a no-op minimum — don't emit spice_level >= 0
         filt.append(f'spice_level >= {int(c["spice_min"])}')
     if c.get("max_price_pp"):
         filt.append(f'price_pp < {float(c["max_price_pp"])}')
