@@ -18,15 +18,28 @@ dish_count() {
     | grep -o '"totalCount":[0-9]*' | head -1 | grep -o '[0-9]*' || true
 }
 
+# Distinguish "Vespa is DOWN" from "Vespa is EMPTY" so a container that is merely still
+# warming up is NEVER mistaken for an empty index and silently re-fed. Wait up to 30s for
+# readiness first, then only feed when Vespa is reachable AND actually has 0 dishes.
+vespa_up() { curl -s -o /dev/null -w '%{http_code}' "http://localhost:8080/state/v1/health" 2>/dev/null | grep -q 200; }
+for _ in $(seq 1 30); do vespa_up && break; sleep 1; done
+
 N="$(dish_count)"
 : "${N:=0}"
 
-if [ "${FRESH:-0}" = "1" ] || [ "$N" -eq 0 ]; then
+if [ "${FRESH:-0}" = "1" ]; then
   [ -f "$ROOT/data/dishes.jsonl" ] || python3 "$ROOT/data/build_dataset.py"
-  echo ">> deploy + feed Vespa (FRESH build — this is the slow part)..."
+  echo ">> FRESH=1 -> deploy + feed Vespa (this is the slow part)..."
   ( cd "$ROOT" && "$PY" deploy_and_feed.py )
-else
+elif ! vespa_up; then
+  echo "!! Vespa not reachable on :8080 — start it first (docker start <vespa-container>), then re-run."
+  echo "   Skipping deploy+feed so your index is NOT rebuilt by accident."
+elif [ "$N" -gt 0 ]; then
   echo ">> Vespa already has data ($N dishes) — skipping deploy+feed. (FRESH=1 to rebuild.)"
+else
+  echo ">> Vespa is up but EMPTY (0 dishes) — deploy + feed..."
+  [ -f "$ROOT/data/dishes.jsonl" ] || python3 "$ROOT/data/build_dataset.py"
+  ( cd "$ROOT" && "$PY" deploy_and_feed.py )
 fi
 
 if [ "${INGEST:-0}" = "1" ]; then
