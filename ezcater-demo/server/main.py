@@ -418,13 +418,23 @@ def _gnode(nid: str) -> dict:
     return {"id": nid, "kind": kind, "label": name}
 
 
+_SEED_CATS = {"meat", "poultry", "seafood", "fish", "cheese"}
+
+
 @app.get("/api/graph/roots")
-def graph_roots():
-    """Top-level anchors to start the explorer: cuisines, allergens, diets (not the 500+ ingredients)."""
+def graph_roots(max_categories: int = 14):
+    """Top-level anchors to start the explorer: cuisines, allergens, diets, and CATEGORIES.
+    LLM growth now yields ~90 categories, so we show the seed categories plus the largest
+    others (by member count) and cap the rest — the long tail is reachable via the search box."""
     if _get_graph is None:
         return {"nodes": [], "stats": {}}
     g = _get_graph().g
-    roots = [_gnode(n) for n, d in g.nodes(data=True) if d.get("kind") in ("cuisine", "allergen", "diet", "category")]
+    roots = [_gnode(n) for n, d in g.nodes(data=True) if d.get("kind") in ("cuisine", "allergen", "diet")]
+    cats = [(n, d.get("name"), g.out_degree(n)) for n, d in g.nodes(data=True) if d.get("kind") == "category"]
+    seed = [n for n, nm, _ in cats if nm in _SEED_CATS]
+    rest = [n for n, _ in sorted([(n, deg) for n, nm, deg in cats if nm not in _SEED_CATS],
+                                 key=lambda x: -x[1])[:max_categories]]
+    roots += [_gnode(n) for n in seed + rest]
     return {"nodes": roots, "stats": _get_graph().stats()}
 
 

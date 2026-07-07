@@ -56,6 +56,9 @@ _CATEGORY_EXPAND = {
     "cheese": ["mozzarella", "feta", "parmesan", "cheddar"],
 }
 
+# junk category values from the LLM we do not turn into nodes
+_CAT_SKIP = {"", "n/a", "na", "unknown", "other", "none", "misc", "ingredient", "food", "item"}
+
 _LLM_SYS = (
     "Classify a single food INGREDIENT for a catering ontology. Return ONLY JSON with keys: "
     "allergens (array from: gluten,dairy,eggs,nuts,peanuts,soy,shellfish,fish,sesame), "
@@ -84,6 +87,9 @@ class OntologyGraph:
         ing = self._node(name, "ingredient")
         if category:
             self.g.nodes[ing]["category"] = category
+            cat = str(category).strip().lower()
+            if cat not in _CAT_SKIP:  # a category is a real navigable node, not just an attribute
+                self._edge(self._node(cat, "category"), ing, "MEMBER")
         for a in allergens:
             self._edge(ing, self._node(a, "allergen"), "CONTAINS")
         for d in diets_violated:
@@ -113,6 +119,23 @@ class OntologyGraph:
             for m in members:
                 self._edge(cnode, self._node(m, "ingredient"), "MEMBER")
         return self
+
+    def materialize_categories(self) -> int:
+        """Backfill: turn each ingredient's LLM-assigned `category` attribute into a real
+        `category --MEMBER--> ingredient` edge, so classified ingredients are connected,
+        navigable nodes instead of orphans. Idempotent; safe to call on every load."""
+        added = 0
+        for n, d in list(self.g.nodes(data=True)):
+            if d.get("kind") != "ingredient":
+                continue
+            cat = (d.get("category") or "").strip().lower()
+            if cat in _CAT_SKIP:
+                continue
+            cnode = self._node(cat, "category")
+            if not self.g.has_edge(cnode, n):
+                self._edge(cnode, n, "MEMBER")
+                added += 1
+        return added
 
     # ---------- growth (LLM, cached) ----------
     def ensure_ingredient(self, name: str) -> str:
@@ -181,6 +204,15 @@ class OntologyGraph:
             return []
         return sorted(self.g.nodes[t]["name"] for _, t in self.g.out_edges(node) if self.g[node][t]["rel"] == "FEATURES")
 
+    def category_members(self, cat: str) -> list[str]:
+        """Ingredients the graph knows belong to a category (via MEMBER edges) — seeded members
+        PLUS everything the LLM has since classified into that category."""
+        node = f"category:{(cat or '').lower().strip()}"
+        if node not in self.g:
+            return []
+        return sorted(self.g.nodes[t]["name"] for _, t in self.g.out_edges(node)
+                      if self.g[node][t]["rel"] == "MEMBER")
+
     def ingredients_for_allergen(self, allergen: str) -> list[str]:
         node = f"allergen:{(allergen or '').lower().strip()}"
         if node not in self.g:
@@ -196,7 +228,11 @@ class OntologyGraph:
             terms += self.expand_cuisine(concepts["cuisine"])
         include_terms: list[str] = []
         for it in (concepts.get("include") or []):
-            include_terms += _CATEGORY_EXPAND.get(str(it).lower().strip(), [str(it)])
+            key = str(it).lower().strip()
+            # traverse the GRAPH's category members, unioned with the curated dict as a
+            # reliable floor; fall back to the term itself if the category is unknown
+            members = sorted(set(self.category_members(key)) | set(_CATEGORY_EXPAND.get(key, [])))
+            include_terms += members or [str(it)]
         terms += include_terms
         allergen_ings = {a: self.ingredients_for_allergen(a) for a in (concepts.get("exclude_allergens") or [])}
         return {"added_terms": sorted(set(terms)), "allergen_ingredients": allergen_ings,
@@ -219,7 +255,9 @@ class OntologyGraph:
         if path.is_file():
             try:
                 g = nx.node_link_graph(json.loads(path.read_text()), directed=True, edges="edges")
-                return cls(g).seed_categories()  # ensure category nodes exist in older graphs
+                og = cls(g).seed_categories()      # ensure the seed category nodes exist
+                og.materialize_categories()        # connect LLM-classified ingredients (no orphans)
+                return og
             except Exception:  # noqa: BLE001
                 pass
         return cls().seed_from_taxonomy()
