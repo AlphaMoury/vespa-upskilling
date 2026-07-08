@@ -168,7 +168,7 @@ function Concepts({ c, graph }) {
   const hit = c.cache === 'hit'
   const added = graph?.added_terms || []
   const algIng = graph?.allergen_ingredients || {}
-  const bare = !c.dietary?.length && !c.include?.length && !c.exclude_allergens?.length && c.spice_min == null && !c.cuisine && !c.max_price_pp && !c.headcount
+  const bare = !c.dietary?.length && !c.include?.length && !c.exclude_allergens?.length && !c.exclude_ingredients?.length && c.spice_min == null && !c.cuisine && !c.max_price_pp && !c.headcount
   return (
     <div className="concepts">
       <div className="cc-head">
@@ -181,6 +181,7 @@ function Concepts({ c, graph }) {
         {(c.dietary || []).map((d) => <span key={d} className="cc-chip good">{d}</span>)}
         {(c.include || []).map((x) => <span key={`i${x}`} className="cc-chip incl">with {x}</span>)}
         {(c.exclude_allergens || []).map((a) => <span key={a} className="cc-chip bad">no {a}</span>)}
+        {(c.exclude_ingredients || []).map((x) => <span key={`x${x}`} className="cc-chip bad">no {x}</span>)}
         {c.spice_min != null && <span className="cc-chip hot">🌶 spice ≥ {c.spice_min}</span>}
         {c.cuisine && <span className="cc-chip">{c.cuisine}</span>}
         {c.max_price_pp && <span className="cc-chip">≤ ${c.max_price_pp}/head</span>}
@@ -358,6 +359,7 @@ function UnderstandPanel({ concepts, graph, llmRaw }) {
     ...(concepts.dietary || []),
     ...(concepts.include || []).map((x) => `with ${x}`),
     ...(concepts.exclude_allergens || []).map((a) => `no ${a}`),
+    ...(concepts.exclude_ingredients || []).map((x) => `no ${x}`),
     concepts.cuisine,
     concepts.spice_min != null ? `spice ≥ ${concepts.spice_min}` : null,
     concepts.max_price_pp ? `≤ $${concepts.max_price_pp}/head` : null,

@@ -229,10 +229,11 @@ class OntologyGraph:
         include_terms: list[str] = []
         for it in (concepts.get("include") or []):
             key = str(it).lower().strip()
-            # traverse the GRAPH's category members, unioned with the curated dict as a
-            # reliable floor; fall back to the term itself if the category is unknown
-            members = sorted(set(self.category_members(key)) | set(_CATEGORY_EXPAND.get(key, [])))
-            include_terms += members or [str(it)]
+            # graph category members ∪ curated dict floor ∪ (if it names an allergen) that
+            # allergen's ingredients — so a POSITIVE "with nuts" expands to almond/cashew/…
+            members = (set(self.category_members(key)) | set(_CATEGORY_EXPAND.get(key, []))
+                       | set(self.ingredients_for_allergen(key)))
+            include_terms += sorted(members) or [str(it)]
         terms += include_terms
         allergen_ings = {a: self.ingredients_for_allergen(a) for a in (concepts.get("exclude_allergens") or [])}
         return {"added_terms": sorted(set(terms)), "allergen_ingredients": allergen_ings,

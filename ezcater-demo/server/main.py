@@ -71,6 +71,9 @@ OCCASION = {"client": "client", "impressive": "impressive", "healthy": "healthy"
             "comfort": "comfort", "celebration": "celebration", "party": "celebration", "morning": "morning"}
 INCLUDE_VOCAB = {"meat", "chicken", "beef", "pork", "lamb", "turkey", "fish", "seafood",
                  "shrimp", "salmon", "tuna", "cheese", "bacon", "sausage"}
+# words that follow a negation cue but are NOT an ingredient to exclude
+_XING_STOP = {"the", "a", "an", "any", "some", "all", "of", "extra", "more", "please",
+              "thanks", "meat", "animal", "spicy", "gluten", "dairy", "problem", "worries"}
 
 
 def understand_heuristic(q: str) -> dict:
@@ -110,20 +113,36 @@ def understand_heuristic(q: str) -> dict:
         w = m3.group(1)
         if w in INCLUDE_VOCAB and w not in inc:
             inc.append(w)
-    return {"free_text": q, "dietary": diet, "exclude_allergens": excl, "spice_min": spice,
-            "cuisine": cuisine, "occasion": occ, "include": inc, "max_price_pp": mp, "headcount": hc, "method": "heuristic"}
+    # "no pickles" / "without onions" / "hold the cilantro" -> exclude a specific ingredient
+    # (allergens are handled above; skip stopwords + protein categories that are dietary intents)
+    xing = []
+    for m4 in re.finditer(r"\b(?:no|without|hold(?: the)?|skip(?: the)?|minus|sans|nix(?: the)?|excluding)\s+([a-z][a-z]+)", t):
+        w = m4.group(1)
+        base = w[:-1] if (w.endswith("s") and len(w) > 3) else w
+        if w in ALLERGENS or w in _XING_STOP or w in INCLUDE_VOCAB or base in xing:
+            continue
+        xing.append(base)
+    return {"free_text": q, "dietary": diet, "exclude_allergens": excl, "exclude_ingredients": xing,
+            "spice_min": spice, "cuisine": cuisine, "occasion": occ, "include": inc,
+            "max_price_pp": mp, "headcount": hc, "method": "heuristic"}
 
 
 _UNDERSTAND_SYS = (
     "Extract structured catering-search concepts from the query. Return ONLY JSON with keys: "
     "free_text (string, the semantic intent), dietary (array of: vegan,vegetarian,gluten-free,dairy-free,halal,kosher), "
-    "exclude_allergens (array of: nuts,peanuts,dairy,gluten,shellfish,fish,soy,eggs,sesame), spice_min (0-3 or null), "
+    "exclude_allergens (array of: nuts,peanuts,dairy,gluten,shellfish,fish,soy,eggs,sesame — ONLY for a NEGATED "
+    "allergen mention like 'no nuts'/'nut-free'/'without dairy'; a POSITIVE 'with nuts'/'with cheese' is NOT an "
+    "exclusion), "
+    "exclude_ingredients (array of specific NON-allergen ingredients the user does NOT want, lowercase, e.g. "
+    "['pickles'] for 'no pickles', ['onion'] for 'without onions', ['cilantro'] for 'hold the cilantro'), "
+    "spice_min (0-3 or null), "
     "cuisine (one of Italian,Mexican,Japanese,Indian,Thai,Mediterranean,American,Chinese,Breakfast or null — "
     "ONLY set this when the user explicitly asks for a cuisine or food category; leave null when they name a "
     "specific dish like 'smoked brisket sliders'), "
     "occasion (array of: client,impressive,healthy,light,comfort,celebration,morning), "
-    "include (array of ingredients/protein categories the user explicitly WANTS present, e.g. "
-    "['meat'] for 'with meat', ['chicken'] for 'with chicken' — empty unless clearly requested; "
+    "include (array of ingredients/categories the user explicitly WANTS present, e.g. "
+    "['meat'] for 'with meat', ['chicken'] for 'with chicken' — empty unless clearly requested. "
+    "A POSITIVE 'with X' goes HERE even if X is an allergen: 'with nuts' -> ['nuts'], 'with cheese' -> ['cheese']. "
     "NEVER put a NEGATED item here: 'no meat' / 'without chicken' / 'meat-free' / 'hold the cheese' "
     "are EXCLUSIONS, not includes. Map 'no meat' / 'meatless' / 'no animal' to dietary ['vegetarian']), "
     "max_price_pp (number or null, per-person budget — a MONEY amount, not a group size), "
@@ -149,7 +168,7 @@ def understand_llm(q: str) -> dict:
     # including a deliberate null/[]. (Overriding turned "not spicy" -> spice_min 2 and
     # "americano" -> cuisine American via the substring heuristic.)
     h = understand_heuristic(q)
-    for k in ("dietary", "exclude_allergens", "cuisine", "occasion", "include", "max_price_pp", "headcount", "spice_min"):
+    for k in ("dietary", "exclude_allergens", "exclude_ingredients", "cuisine", "occasion", "include", "max_price_pp", "headcount", "spice_min"):
         if k not in data:
             data[k] = h.get(k)
     return data
@@ -226,7 +245,7 @@ def understand_stream(q: str = "", hits: int = 8, source: str = "",
                 concepts["method"] = "llm"
                 concepts["cache"] = "miss"
                 h = understand_heuristic(q)
-                for k in ("dietary", "exclude_allergens", "cuisine", "occasion", "include", "max_price_pp", "headcount", "spice_min"):
+                for k in ("dietary", "exclude_allergens", "exclude_ingredients", "cuisine", "occasion", "include", "max_price_pp", "headcount", "spice_min"):
                     if k not in concepts:  # backfill omitted keys only; respect deliberate LLM null/[]
                         concepts[k] = h.get(k)
                 if ingest_semcache is not None:
@@ -595,6 +614,13 @@ def _understood_yql(c, hits, source="", include_terms=None, extra=""):
         filt.append(f'dietary contains "{d}"')
     for a in c.get("exclude_allergens") or []:
         filt.append(f'!(allergens contains "{a}")')
+    for ing in c.get("exclude_ingredients") or []:   # "no pickles" -> drop dishes containing pickles
+        v = re.sub(r'[^a-z0-9 -]', '', str(ing).lower()).strip()
+        if not v:
+            continue
+        variants = {v, v[:-1]} if (v.endswith("s") and len(v) > 3) else {v, v + "s"}  # array contains is EXACT
+        ors = " or ".join(f'ingredients contains "{x}"' for x in sorted(variants))
+        filt.append(f"!({ors})")
     if c.get("spice_min"):  # 0 ("not spicy") is a no-op minimum — don't emit spice_level >= 0
         filt.append(f'spice_level >= {int(c["spice_min"])}')
     if c.get("max_price_pp"):

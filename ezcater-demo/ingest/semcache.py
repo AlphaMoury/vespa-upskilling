@@ -39,6 +39,9 @@ _GUARD_SYN = {"nuts": "nut", "peanut": "nut", "peanuts": "nut", "eggs": "egg", "
 # intent (the exact bug: a "no meat" query reusing a cached "with meat" answer).
 _NEG = {"no", "not", "without", "nothing", "sans", "hold", "minus", "exclude",
         "excluding", "avoid", "skip", "never", "non", "none", "anti"}
+# words to step over when looking for the negated content word ("no THE pickles")
+_GUARD_SKIP = {"the", "a", "an", "any", "some", "all", "of", "very", "really", "too",
+               "more", "that", "this", "my", "our", "please", "with", "and", "extra"}
 
 
 def _guard_tokens(text: str) -> frozenset:
@@ -60,6 +63,22 @@ def _guard_tokens(text: str) -> frozenset:
         neg = any(words[j] in _NEG for j in range(max(0, i - 3), i))                       # "no meat"
         neg = neg or any(words[j] == "free" for j in range(i + 1, min(len(words), i + 3)))  # "gluten free"
         s.add(("!" if neg else "") + c)
+    # capture NEGATED arbitrary ingredients ("no pickles", "without onions") the allergen
+    # vocab doesn't know, so an exclusion still reads as a distinct intent (not a cache hit)
+    for i, w in enumerate(words):
+        if w not in _NEG:
+            continue
+        for j in range(i + 1, min(len(words), i + 4)):
+            nx = words[j]
+            if nx in _GUARD_SKIP or nx in _NEG:
+                continue
+            if len(nx) >= 3:
+                base = _GUARD_SYN.get(nx, nx)
+                if base.endswith("s") and len(base) > 3:
+                    base = base[:-1]
+                if base not in _GUARD_VOCAB:   # allergen/diet already captured with polarity
+                    s.add("x!" + base)
+            break
     for n in re.findall(r"\d+", text or ""):   # numbers flip intent too (headcount "for 25", budget "$20")
         s.add("#" + n)
     return frozenset(s)
