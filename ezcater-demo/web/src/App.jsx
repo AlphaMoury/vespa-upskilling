@@ -3,6 +3,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 const API = 'http://localhost:8009'
 const PAGE_SIZE = 8              // results shown per page
 const FETCH_N = 48              // window fetched per column, paginated client-side
+// native browser speech-to-text (Chrome/Edge/Safari); no server, no key
+const SpeechRec = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)
 const KIND_COLOR = { cuisine: '#00695c', allergen: '#c62828', diet: '#2e7d32', category: '#a15c00', ingredient: '#7c8698' }
 
 const INDEXES = {
@@ -740,6 +742,8 @@ export default function App() {
   const [cols, setCols] = useState([])    // progressive result columns (each fills independently)
   const [page, setPage] = useState(0)     // client-side pagination over the fetched window
   const resultsRef = useRef(null)         // scroll target so paging jumps back to the top
+  const [listening, setListening] = useState(false)   // voice search
+  const recRef = useRef(null)
   const [concepts, setConcepts] = useState(null)
   const [graph, setGraph] = useState(null)
   const [health, setHealth] = useState(null)
@@ -833,6 +837,33 @@ export default function App() {
     window.scrollTo({ top: Math.max(0, top), behavior: rm ? 'auto' : 'smooth' })
   }
 
+  // voice search: browser-native speech-to-text with live interim transcription; runs the
+  // search when you stop speaking. No server, no API key.
+  const toggleMic = () => {
+    if (listening) { recRef.current?.stop(); return }
+    if (!SpeechRec) return
+    const rec = new SpeechRec()
+    rec.lang = 'en-US'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1
+    let finalText = ''
+    rec.onresult = (e) => {
+      let interim = ''
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript
+        if (e.results[i].isFinal) finalText += t; else interim += t
+      }
+      setQ((finalText + interim).replace(/\s+/g, ' ').trim())   // live update as you speak
+      setOpen(false)
+    }
+    rec.onerror = () => { setListening(false); recRef.current = null }
+    rec.onend = () => {
+      setListening(false); recRef.current = null
+      const t = finalText.replace(/\s+/g, ' ').trim()
+      if (t) run(t)                                             // auto-search when you stop
+    }
+    recRef.current = rec; setListening(true)
+    try { rec.start() } catch { setListening(false); recRef.current = null }
+  }
+
   const switchIndex = (s) => {
     setSchema(s); setQ(''); setLastQ(''); setCols([]); setSugg([]); setConcepts(null); setGraph(null)
     setCuisine(''); setDiet([]); setMaxprice(''); setHeadcount(''); setSource(''); setUnderstand(false)
@@ -884,6 +915,15 @@ export default function App() {
           onChange={(e) => { setQ(e.target.value); setOpen(true) }}
           onKeyDown={(e) => { if (e.key === 'Enter') run() }}
           onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)} />
+        {SpeechRec && (
+          <button className={`mic ${listening ? 'on' : ''}`} onClick={toggleMic} type="button"
+            title={listening ? 'Listening… click to stop' : 'Search by voice'}
+            aria-label="Search by voice" aria-pressed={listening}>
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10a7 7 0 0 0 14 0" /><line x1="12" y1="19" x2="12" y2="22" />
+            </svg>
+          </button>
+        )}
         <button className="go" style={{ background: cfg.accent }} onClick={() => run()}>Search</button>
         {open && sugg.length > 0 && (
           <div className="suggest">

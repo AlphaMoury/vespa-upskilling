@@ -51,6 +51,12 @@ body{margin:0;color:var(--ink);min-height:100vh;background-attachment:fixed;
   background:var(--card);outline:none;transition:.18s;box-shadow:var(--shadow-sm)}
 .search:focus{border-color:var(--orange);box-shadow:0 0 0 4px #e3520522,var(--shadow)}
 .go{background:linear-gradient(135deg,var(--orange-2),var(--orange));color:#fff;border:0;border-radius:16px;padding:0 28px;font-size:16px;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(227,82,5,.28);transition:.15s}
+.mic{flex:none;display:flex;align-items:center;justify-content:center;width:52px;border:1.5px solid var(--line);
+  border-radius:16px;background:var(--card);color:#5b6472;cursor:pointer;transition:.15s}
+.mic:hover{border-color:var(--orange);color:var(--orange)}
+.mic.on{border-color:#e0392b;color:#fff;background:#e0392b;animation:micpulse 1.25s ease-in-out infinite}
+@keyframes micpulse{0%,100%{box-shadow:0 0 0 0 rgba(224,57,43,.4)}50%{box-shadow:0 0 0 7px rgba(224,57,43,0)}}
+@media(prefers-reduced-motion:reduce){.mic.on{animation:none}}
 .go:hover{filter:brightness(1.04);transform:translateY(-1px)}
 .suggest{position:absolute;top:60px;left:0;right:120px;background:#fff;border:1px solid var(--line);
   border-radius:12px;box-shadow:0 12px 28px rgba(0,0,0,.12);overflow:hidden;z-index:20}
