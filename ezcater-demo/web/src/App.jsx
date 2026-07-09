@@ -3,8 +3,17 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 const API = 'http://localhost:8009'
 const PAGE_SIZE = 8              // results shown per page
 const FETCH_N = 48              // window fetched per column, paginated client-side
-// native browser speech-to-text (Chrome/Edge/Safari); no server, no key
+// native browser speech-to-text (Chrome/Edge); falls back to server Whisper when the
+// browser's cloud speech service is blocked (Safari/Brave/corporate networks)
 const SpeechRec = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)
+const CAN_RECORD = typeof window !== 'undefined' && !!(navigator.mediaDevices?.getUserMedia) && typeof MediaRecorder !== 'undefined'
+const MICERR = {
+  'not-allowed': 'Microphone blocked — allow mic access for this site, then retry.',
+  'service-not-allowed': 'Microphone blocked by the browser/OS settings.',
+  'no-speech': 'No speech detected — speak clearly and retry.',
+  'audio-capture': 'No microphone found — check your input device.',
+  'aborted': '',
+}
 const KIND_COLOR = { cuisine: '#00695c', allergen: '#c62828', diet: '#2e7d32', category: '#a15c00', ingredient: '#7c8698' }
 
 const INDEXES = {
@@ -744,7 +753,9 @@ export default function App() {
   const resultsRef = useRef(null)         // scroll target so paging jumps back to the top
   const [listening, setListening] = useState(false)   // voice search
   const [micMsg, setMicMsg] = useState('')            // voice status / error feedback
-  const recRef = useRef(null)
+  const recRef = useRef(null)                         // Web Speech recognizer
+  const mediaRef = useRef(null)                       // MediaRecorder (Whisper fallback)
+  const whisperOnlyRef = useRef(false)                // once browser speech fails, skip straight to Whisper
   const [concepts, setConcepts] = useState(null)
   const [graph, setGraph] = useState(null)
   const [health, setHealth] = useState(null)
@@ -838,44 +849,85 @@ export default function App() {
     window.scrollTo({ top: Math.max(0, top), behavior: rm ? 'auto' : 'smooth' })
   }
 
-  // voice search: browser-native speech-to-text with live interim transcription; auto-runs
-  // the search a moment after you stop speaking. No server, no API key.
-  const toggleMic = () => {
-    if (listening) { recRef.current?.stop(); return }
-    if (!SpeechRec) { setMicMsg('Voice search needs Chrome, Edge, or Safari.'); return }
+  // Server Whisper path: record a clip → POST → transcribe → search. Works in ANY browser
+  // (uses the OpenAI key), so it's the fallback when the browser's cloud speech is blocked.
+  const startWhisper = async () => {
+    if (!CAN_RECORD) { setListening(false); setMicMsg('Voice not supported in this browser.'); return }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const rec = new MediaRecorder(stream)
+      const chunks = []
+      rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data) }
+      rec.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop()); mediaRef.current = null; setListening(false)
+        const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' })
+        if (blob.size < 1400) { setMicMsg('No audio captured — check your microphone.'); return }
+        setMicMsg('Transcribing…')
+        try {
+          const fd = new FormData(); fd.append('file', blob, 'voice.webm')
+          const d = await fetch(`${API}/api/transcribe`, { method: 'POST', body: fd }).then((x) => x.json())
+          const t = (d.text || '').trim()
+          if (t) { setMicMsg(''); setQ(t); run(t) }
+          else setMicMsg(d.error ? ('Transcription failed: ' + d.error) : 'Could not transcribe — try again.')
+        } catch (err) { setMicMsg('Transcription failed: ' + err.message) }
+      }
+      mediaRef.current = { rec, stream }
+      setListening(true); setMicMsg('🎙 Recording… click the mic to stop')
+      rec.start()
+    } catch (err) {
+      setListening(false)
+      setMicMsg(err.name === 'NotAllowedError' ? 'Microphone blocked — allow mic access for this site.' : 'Mic error: ' + err.message)
+    }
+  }
+
+  // Browser-native real-time speech (Chrome/Edge). Live interim text; auto-search on silence.
+  // Falls back to Whisper if the browser's speech service is unreachable (network/service error).
+  const startWebSpeech = () => {
     const rec = new SpeechRec()
     rec.lang = 'en-US'; rec.interimResults = true; rec.continuous = true; rec.maxAlternatives = 1
-    let finalText = '', silence
-    const armSilence = () => { clearTimeout(silence); silence = setTimeout(() => { try { rec.stop() } catch { /* */ } }, 1600) }
+    let finalText = '', silence, settled = false
+    const arm = () => { clearTimeout(silence); silence = setTimeout(() => { try { rec.stop() } catch { /* */ } }, 1600) }
     rec.onstart = () => { setListening(true); setMicMsg('Listening… speak now') }
-    rec.onspeechstart = () => setMicMsg('Listening…')
     rec.onresult = (e) => {
       let interim = ''
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const t = e.results[i][0].transcript
         if (e.results[i].isFinal) finalText += t + ' '; else interim += t
       }
-      setQ((finalText + interim).replace(/\s+/g, ' ').trim())   // live update as you speak
-      setMicMsg(''); setOpen(false)
-      armSilence()                                              // stop shortly after you go quiet
+      setQ((finalText + interim).replace(/\s+/g, ' ').trim()); setMicMsg(''); setOpen(false); arm()
     }
     rec.onerror = (e) => {
-      clearTimeout(silence)
-      const M = { 'not-allowed': 'Microphone blocked — allow mic access for this site, then retry.',
-        'service-not-allowed': 'Microphone blocked by the browser/OS settings.',
-        'no-speech': 'No speech detected — check your mic is picking up sound, then retry.',
-        'audio-capture': 'No microphone found — check your input device.',
-        'network': 'Speech service unreachable — voice needs an internet connection.' }
-      setMicMsg(M[e.error] || `Voice error: ${e.error}`)
+      clearTimeout(silence); settled = true; recRef.current = null
+      if (['network', 'service-not-allowed', 'audio-capture'].includes(e.error) && CAN_RECORD) {
+        whisperOnlyRef.current = true                           // stop retrying the blocked browser service
+        setMicMsg('Browser speech unavailable — switching to server transcription…')
+        startWhisper()                                          // seamless fallback (uses OpenAI key)
+        return
+      }
+      setListening(false); setMicMsg(MICERR[e.error] ?? ('Voice error: ' + e.error))
     }
     rec.onend = () => {
-      clearTimeout(silence); setListening(false); recRef.current = null
+      if (settled) return
+      clearTimeout(silence); recRef.current = null; setListening(false)
       const t = finalText.replace(/\s+/g, ' ').trim()
       if (t) { setMicMsg(''); run(t) }                          // auto-search when you stop
     }
     recRef.current = rec
     setListening(true); setMicMsg('Starting…')
-    try { rec.start() } catch (err) { setListening(false); recRef.current = null; setMicMsg('Could not start voice input — ' + err.message) }
+    try { rec.start() } catch { recRef.current = null; startWhisper() }
+  }
+
+  const toggleMic = () => {
+    if (listening) {
+      if (mediaRef.current) { try { mediaRef.current.rec.stop() } catch { /* */ } }
+      else if (recRef.current) { try { recRef.current.stop() } catch { /* */ } }
+      else setListening(false)
+      return
+    }
+    setMicMsg('')
+    if (SpeechRec && !whisperOnlyRef.current) startWebSpeech()
+    else if (CAN_RECORD) startWhisper()
+    else setMicMsg('Voice search is not supported in this browser.')
   }
 
   const switchIndex = (s) => {
@@ -929,7 +981,7 @@ export default function App() {
           onChange={(e) => { setQ(e.target.value); setOpen(true) }}
           onKeyDown={(e) => { if (e.key === 'Enter') run() }}
           onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)} />
-        {SpeechRec && (
+        {(SpeechRec || CAN_RECORD) && (
           <button className={`mic ${listening ? 'on' : ''}`} onClick={toggleMic} type="button"
             title={listening ? 'Listening… click to stop' : 'Search by voice'}
             aria-label="Search by voice" aria-pressed={listening}>

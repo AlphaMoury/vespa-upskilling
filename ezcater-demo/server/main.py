@@ -447,6 +447,29 @@ async def upload_pdf(file: UploadFile = File(...)):
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+# ---------------- voice search: server-side speech-to-text (OpenAI Whisper) ----------------
+@app.post("/api/transcribe")
+async def transcribe(file: UploadFile = File(...)):
+    """Transcribe a short audio clip with Whisper — the reliable voice path that works in any
+    browser (the browser Web Speech API depends on Google's/Apple's service, which is often
+    blocked). Uses the same OpenAI key as the rest of the demo."""
+    if ingest_llm is None:
+        return {"text": "", "error": "no LLM provider configured"}
+    data = await file.read()
+    if not data:
+        return {"text": "", "error": "empty audio"}
+    try:
+        import io
+        buf = io.BytesIO(data)
+        buf.name = file.filename or "voice.webm"
+        client = ingest_llm._get_client()
+        model = (ingest_config.OPENAI_TRANSCRIBE_MODEL if ingest_config and hasattr(ingest_config, "OPENAI_TRANSCRIBE_MODEL") else "whisper-1")
+        r = client.audio.transcriptions.create(model=model, file=buf, language="en")
+        return {"text": (getattr(r, "text", "") or "").strip()}
+    except Exception as e:  # noqa: BLE001
+        return {"text": "", "error": str(e)}
+
+
 # ---------------- ontology graph explorer (lazy expand/collapse) ----------------
 def _gnode(nid: str) -> dict:
     kind, _, name = nid.partition(":")
