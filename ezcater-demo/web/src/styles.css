@@ -79,7 +79,9 @@ mark.hl-sem{background:#bff0e2;color:inherit;border-radius:3px;padding:0 2px;fon
 .col-head{border-top:3px solid;padding:10px 2px 12px;margin-bottom:6px}
 .col-title{font-weight:800;font-size:15.5px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .col-time{font-size:11px;font-weight:700;color:#0277bd;background:#0277bd12;border:1px solid #0277bd33;border-radius:999px;padding:1px 8px}
-.col-sub{font-size:12px;color:var(--muted)}
+.col-sub{font-size:12px;color:var(--muted);display:flex;align-items:baseline;gap:5px;flex-wrap:wrap}
+.col-count{color:#374151;font-variant-numeric:tabular-nums}
+.col-count b{font-weight:800;color:var(--ink)}
 .col-rank{color:#8a94a6}
 .col-loading{color:var(--muted);padding:14px 2px;font-size:14px;font-weight:600;animation:pulse 1.15s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:.45}50%{opacity:1}}

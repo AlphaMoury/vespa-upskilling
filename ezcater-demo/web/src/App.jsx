@@ -136,14 +136,20 @@ function Card({ hit, showScores, hl }) {
   )
 }
 
-function Column({ title, subtitle, ranking, accent, data, loading, showScores, hl, took, loadingLabel, stream }) {
+function Column({ title, subtitle, ranking, accent, data, loading, showScores, hl, took, loadingLabel, stream, total }) {
   return (
     <div className="col">
       <div className="col-head" style={{ borderColor: accent }}>
         <div className="col-title" style={{ color: accent }}>
           {title}{took?.total_ms != null && <span className="col-time" title="server time: understanding (if any) + Vespa retrieval">⏱ {took.total_ms} ms</span>}
         </div>
-        <div className="col-sub">{subtitle}{ranking && <> · <span className="col-rank">ranked by {ranking}</span></>}</div>
+        <div className="col-sub">
+          {!loading && typeof total === 'number' && (
+            <span className="col-count" title="total matches in Vespa (showing the top few)"><b>{total.toLocaleString()}</b> {total === 1 ? 'result' : 'results'}</span>
+          )}
+          {!loading && typeof total === 'number' && <span className="dot">·</span>}
+          {subtitle}{ranking && <> · <span className="col-rank">ranked by {ranking}</span></>}
+        </div>
       </div>
       {loading && stream ? (
         stream.phase === 'retrieving' ? <div className="col-loading">ranking in Vespa…</div>
@@ -951,7 +957,7 @@ export default function App() {
                   accent={col.accentKind === 'hero' ? cfg.accent : '#9aa0a6'} data={col.data} loading={col.loading}
                   loadingLabel={col.key === 'understood' ? '🧠 understanding…' : 'searching…'}
                   stream={col.key === 'understood' ? { text: col.stream, phase: col.phase, cached: col.streamCached } : undefined}
-                  showScores={col.key !== 'keyword'} hl={hl} took={col.resp?.timing} />
+                  showScores={col.key !== 'keyword'} hl={hl} took={col.resp?.timing} total={col.resp?.total} />
               )
             })}
           </div>

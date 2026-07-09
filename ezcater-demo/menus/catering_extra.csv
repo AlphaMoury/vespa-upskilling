@@ -1,0 +1,43 @@
+Item,Description,Category,Serves,Price,Vendor,Ingredients,Diet
+Breakfast Tacos,"Scrambled eggs, cheese, and salsa in warm flour tortillas",Breakfast,12,96,Sunrise Kitchen,eggs; cheddar; flour tortilla; salsa; scallions,vegetarian
+Bacon & Egg Breakfast Tacos,"Crispy bacon, egg, and potato in corn tortillas",Breakfast,12,108,Sunrise Kitchen,bacon; eggs; potato; corn tortilla; cheddar,
+Chorizo Breakfast Tacos,Spiced chorizo with scrambled eggs and cotija,Breakfast,12,114,Austin Taco Co.,chorizo; eggs; cotija; corn tortilla; cilantro,
+Migas Breakfast Tacos,"Crispy tortilla strips scrambled with eggs, peppers, and cheese",Breakfast,10,90,Austin Taco Co.,eggs; tortilla chips; bell pepper; onion; cheddar,vegetarian
+Breakfast Burritos,"Eggs, potato, cheese, and salsa in a flour tortilla",Breakfast,10,100,Sunrise Kitchen,eggs; potato; cheddar; flour tortilla; salsa,vegetarian
+Chilaquiles Verdes,Tortilla chips simmered in green salsa with eggs and crema,Breakfast,8,88,Verde Provisions,tortilla chips; tomatillo; eggs; crema; queso fresco,vegetarian
+Avocado Toast Platter,"Sourdough with smashed avocado, radish, and chili flakes",Breakfast,10,90,Green Fork,sourdough; avocado; radish; chili; lemon,vegan
+Acai Bowls,"Blended acai with granola, banana, and berries",Breakfast,8,96,Green Fork,acai; granola; banana; strawberry; blueberry; honey,vegetarian
+Overnight Oats Jars,Rolled oats soaked in almond milk with chia and berries,Breakfast,12,84,Green Fork,rolled oats; almond milk; chia seeds; blueberry; maple syrup,vegan
+Smoked Salmon Bagels,"Everything bagels with cream cheese, lox, and capers",Breakfast,10,140,Harbor Deli,bagel; cream cheese; smoked salmon; capers; red onion,
+Greek Yogurt Parfaits,Layered yogurt with house granola and honey,Breakfast,12,78,Green Fork,greek yogurt; granola; honey; strawberry,vegetarian
+Buttermilk Pancake Stack,Fluffy pancakes with maple syrup and butter,Breakfast,10,80,Sunrise Kitchen,flour; buttermilk; eggs; maple syrup; butter,vegetarian
+Veggie Frittata Squares,"Baked eggs with spinach, tomato, and feta",Breakfast,12,96,Sunrise Kitchen,eggs; spinach; tomato; feta; onion,vegetarian; gluten-free
+Al Pastor Tacos,"Marinated pork with pineapple, onion, and cilantro",Mexican,20,180,Austin Taco Co.,pork; pineapple; onion; cilantro; corn tortilla,gluten-free
+Baja Fish Tacos,Crispy fish with cabbage slaw and lime crema,Mexican,16,176,Coastal Kitchen,cod; cabbage; lime; crema; corn tortilla,
+Carne Asada Tacos,"Grilled steak with onion, cilantro, and salsa verde",Mexican,20,200,Verde Provisions,steak; onion; cilantro; salsa verde; corn tortilla,gluten-free
+Roasted Cauliflower Tacos,Spiced cauliflower with avocado crema and slaw,Mexican,16,144,Verde Provisions,cauliflower; avocado; cabbage; lime; corn tortilla,vegan
+Chili-Lime Shrimp Tacos,Grilled shrimp with mango salsa,Mexican,16,192,Coastal Kitchen,shrimp; mango; lime; cilantro; corn tortilla,
+Chicken Teriyaki Bowl,Grilled chicken over rice with teriyaki and edamame,Japanese,12,156,Bamboo Table,chicken; rice; teriyaki; edamame; scallions,
+Salmon Poke Bowl,"Sushi-grade salmon with rice, avocado, and seaweed",Japanese,10,190,Bamboo Table,salmon; rice; avocado; seaweed; soy sauce; sesame,dairy-free
+Mediterranean Grain Bowl,"Farro with chickpeas, cucumber, feta, and tahini",Mediterranean,12,132,Saffron Eats,farro; chickpeas; cucumber; feta; tahini,vegetarian
+Buddha Bowl,"Quinoa with roasted veggies, kale, and lemon tahini",Salads & Bowls,12,120,Green Fork,quinoa; sweet potato; kale; chickpeas; tahini,vegan; gluten-free
+Korean Bibimbap Bowl,"Rice with bulgogi, vegetables, and gochujang",Korean,12,156,Seoul Kitchen,rice; beef; spinach; carrots; gochujang; egg,
+Burrito Bowl,"Cilantro-lime rice with black beans, fajita veggies, and pico",Mexican,15,135,Verde Provisions,rice; black beans; bell pepper; onion; pico de gallo,vegan; gluten-free
+Chopped Cobb Salad,"Greens with chicken, bacon, egg, avocado, and blue cheese",American,12,138,Harvest Table,romaine; chicken; bacon; egg; avocado; blue cheese,gluten-free
+Caesar Salad,"Romaine with parmesan, croutons, and caesar dressing",Italian,12,96,Bella Provisions,romaine; parmesan; croutons; caesar; anchovy,
+Kale & Quinoa Salad,"Massaged kale with quinoa, cranberries, and almonds",Salads & Bowls,12,108,Green Fork,kale; quinoa; cranberry; almond; lemon,vegan; gluten-free
+Chicken Shawarma Wraps,Spiced chicken with garlic sauce in warm pita,Mediterranean,20,170,Saffron Eats,chicken; garlic sauce; pita; tomato; lettuce,
+Falafel Wraps,Crispy falafel with hummus and tabbouleh in pita,Mediterranean,20,150,Saffron Eats,falafel; hummus; tabbouleh; pita; tahini,vegan
+Turkey Club Wraps,"Roasted turkey, bacon, lettuce, and tomato in a wrap",American,15,120,Harbor Deli,turkey; bacon; lettuce; tomato; flour tortilla,
+Butter Chicken,Tandoori chicken in a spiced tomato cream sauce,Indian,15,165,Saffron Eats,chicken; tomato; cream; garam masala; ginger,gluten-free
+Chana Masala,Chickpeas simmered in a spiced tomato-onion gravy,Indian,15,120,Saffron Eats,chickpeas; tomato; onion; garam masala; ginger,vegan; gluten-free
+Pad Thai,"Rice noodles with tofu, peanuts, and tamarind",Thai,12,132,Bamboo Table,rice noodles; tofu; peanut; tamarind; bean sprouts,vegetarian
+Green Curry Chicken,Coconut green curry with chicken and thai basil,Thai,12,144,Bamboo Table,chicken; coconut milk; green curry paste; thai basil,gluten-free; dairy-free
+Smoked Brisket Platter,Slow-smoked brisket with pickles and toast,American,20,260,Fireside BBQ,brisket; pickles; toast; bbq sauce,
+BBQ Pulled Pork Sliders,Slow-cooked pork on brioche with slaw,American,24,168,Fireside BBQ,pork; brioche; cabbage; bbq sauce,
+Eggplant Parmesan,Breaded eggplant with marinara and mozzarella,Italian,12,120,Bella Provisions,eggplant; marinara; mozzarella; parmesan; basil,vegetarian
+Street Corn Elote,"Grilled corn with cotija, lime, and chili",Mexican,15,75,Austin Taco Co.,corn; cotija; lime; chili; mayonnaise,vegetarian; gluten-free
+Garlic Parmesan Fries,Crispy fries tossed with garlic and parmesan,American,15,60,Harbor Deli,potato; garlic; parmesan; parsley,vegetarian
+Chocolate Chip Cookies,Fresh-baked cookies with dark chocolate,Dessert,24,72,Sweet Tooth,flour; butter; dark chocolate; brown sugar; eggs,vegetarian
+Fruit & Cheese Board,Seasonal fruit with artisan cheeses and crackers,American,15,150,Harvest Table,grapes; brie; cheddar; crackers; almonds,vegetarian
+Tiramisu Cups,Espresso-soaked ladyfingers with mascarpone,Italian,12,96,Bella Provisions,ladyfingers; mascarpone; espresso; cocoa,vegetarian
