@@ -23,6 +23,7 @@ Persisted to data/ontology_graph.json so growth survives across runs.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -58,6 +59,21 @@ _CATEGORY_EXPAND = {
 
 # junk category values from the LLM we do not turn into nodes
 _CAT_SKIP = {"", "n/a", "na", "unknown", "other", "none", "misc", "ingredient", "food", "item"}
+
+
+def _cuisine_requested(cuisine: str, text: str) -> bool:
+    """Did the user actually ASK for this cuisine, or did the LLM infer it from a dish name?
+    'italian pasta' -> yes. 'pizza' (LLM guessed Italian) -> no. Only an explicit request may
+    expand the vector query, otherwise a one-word dish query gets drowned by cuisine terms."""
+    c, t = (cuisine or "").lower().strip(), (text or "").lower()
+    if not c or not t:
+        return False
+    if c in t:
+        return True
+    for w in re.findall(r"[a-z]+", c):          # 'Salads & Bowls' -> salads/bowls -> 'salad bowl'
+        if len(w) >= 4 and (w in t or w.rstrip("s") in t):
+            return True
+    return False
 
 _LLM_SYS = (
     "Classify a single food INGREDIENT for a catering ontology. Return ONLY JSON with keys: "
@@ -224,7 +240,11 @@ class OntologyGraph:
         cuisine -> featured terms (broaden recall); include (e.g. 'meat') -> its member ingredients
         (boosts wanted items in the vector leg); exclude_allergens -> their ingredients (explain)."""
         terms: list[str] = []
-        if concepts.get("cuisine"):
+        # Only expand an EXPLICITLY requested cuisine. An INFERRED one (the LLM tagging "pizza"
+        # as Italian) would flood the vector query with generic Italian ingredients — basil,
+        # mozzarella, risotto — and bury the exact match. Expanding a cuisine the user never
+        # typed trades precision for recall the user didn't ask for.
+        if concepts.get("cuisine") and _cuisine_requested(concepts["cuisine"], concepts.get("free_text")):
             terms += self.expand_cuisine(concepts["cuisine"])
         include_terms: list[str] = []
         for it in (concepts.get("include") or []):

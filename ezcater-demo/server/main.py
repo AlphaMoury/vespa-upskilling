@@ -138,8 +138,9 @@ _UNDERSTAND_SYS = (
     "['pickles'] for 'no pickles', ['onion'] for 'without onions', ['cilantro'] for 'hold the cilantro'), "
     "spice_min (0-3 or null), "
     "cuisine (one of Italian,Mexican,Japanese,Indian,Thai,Mediterranean,American,Chinese,Breakfast or null — "
-    "ONLY set this when the user explicitly asks for a cuisine or food category; leave null when they name a "
-    "specific dish like 'smoked brisket sliders'), "
+    "ONLY set this when the user NAMES the cuisine explicitly. Leave it null when they name a specific dish, "
+    "even if that dish belongs to a cuisine: 'pizza' -> null (NOT Italian), 'tacos' -> null (NOT Mexican), "
+    "'smoked brisket sliders' -> null. 'italian food' -> Italian), "
     "occasion (array of: client,impressive,healthy,light,comfort,celebration,morning), "
     "include (array of ingredients/categories the user explicitly WANTS present, e.g. "
     "['meat'] for 'with meat', ['chicken'] for 'with chicken' — empty unless clearly requested. "
@@ -179,6 +180,19 @@ def _llm_query_on() -> bool:
     return bool(ingest_config and ingest_config.query_llm_enabled())
 
 
+def _cached_free_text(cached: dict, q: str) -> str:
+    """Which text should we actually SEARCH for on a cache hit?
+
+    An EXACT hit is the same query, so the LLM's cleaned free_text belongs to it. A SEMANTIC
+    (paraphrase) hit belongs to a DIFFERENT query — reusing its free_text would search for the
+    wrong thing ("tacos" reusing "pizza"). The structured CONSTRAINTS (diet/allergens/price)
+    do transfer across paraphrases; the search text never does.
+    """
+    if cached.get("_cache") == "exact":
+        return cached.get("free_text") or q
+    return q
+
+
 def understand(q: str) -> dict:
     """LLM-first (bounded by a SEMANTIC CACHE) when enabled; deterministic regex otherwise.
     The cache keys on the query's intent embedding, so paraphrases reuse one LLM answer."""
@@ -187,7 +201,7 @@ def understand(q: str) -> dict:
     if ingest_semcache is not None:
         cached = ingest_semcache.get(q)
         if cached is not None:
-            return {**cached, "free_text": cached.get("free_text") or q, "cache": "hit"}
+            return {**cached, "free_text": _cached_free_text(cached, q), "cache": "hit"}
     result = understand_llm(q)
     if ingest_semcache is not None:
         ingest_semcache.put(q, result)
@@ -223,7 +237,7 @@ def understand_stream(q: str = "", hits: int = 8, source: str = "",
         else:
             cached = ingest_semcache.get(q) if ingest_semcache is not None else None
             if cached is not None:
-                concepts = {**cached, "free_text": cached.get("free_text") or q, "cache": "hit"}
+                concepts = {**cached, "free_text": _cached_free_text(cached, q), "cache": "hit"}
                 yield _sse({"type": "cached", "concepts": concepts})
             else:
                 acc = ""
