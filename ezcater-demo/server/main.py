@@ -17,6 +17,7 @@ import re
 import sys
 import time
 import json
+import hashlib
 import tempfile
 import shutil
 from pathlib import Path
@@ -398,11 +399,26 @@ async def upload_pdf(file: UploadFile = File(...)):
             yield _sse({"type": "status", "msg": f"transcribed {len(items)} items — enriching + indexing…"})
             g = _get_graph() if _get_graph is not None else None
             fed, caterer = 0, None
+            # Idempotent re-upload: derive each doc id from the normalized dish NAME (not the
+            # vision-transcribed caterer, which varies run-to-run), and delete any prior pdf docs
+            # sharing a name so re-uploading the same menu REPLACES it instead of duplicating.
+            new_names = {re.sub(r"\s+", " ", (it.name or "").strip().lower()) for it in items if it.name}
+            try:
+                prev = _vespa({"yql": 'select * from dish where source matches "pdf.*"', "hits": 400, "timeout": "5s"})
+                for h in prev.get("root", {}).get("children", []) or []:
+                    did = (h.get("id") or "").split("::")[-1]
+                    nm = re.sub(r"\s+", " ", (h.get("fields", {}).get("name") or "").strip().lower())
+                    if did and nm in new_names:
+                        requests.delete(f"{VESPA_DOC}/{NAMESPACE}/dish/docid/{did}", timeout=10)
+            except Exception:  # noqa: BLE001
+                pass
             for it in items:
                 before = g.stats().get("ingredient", 0) if g else 0
                 _enrich(it)
                 added = (g.stats().get("ingredient", 0) - before) if g else 0
                 doc = it.to_vespa_doc()
+                doc["id"] = "pdfmenu-" + hashlib.sha1(re.sub(r"\s+", " ", (it.name or "").strip().lower()).encode()).hexdigest()[:12]
+                doc["fields"]["id"] = doc["id"]
                 ok = False
                 try:
                     rr = requests.post(f"{VESPA_DOC}/{NAMESPACE}/dish/docid/{doc['id']}",
