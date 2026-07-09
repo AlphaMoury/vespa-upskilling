@@ -951,6 +951,10 @@ export default function App() {
   const onPrice = (v) => { setMaxprice(v); if (lastQ) run(lastQ, { maxprice: v }) }
   const onHeadcount = (v) => { setHeadcount(v); if (lastQ) run(lastQ, { headcount: v }) }
   const onSource = (v) => { setSource(v); if (lastQ) run(lastQ, { source: v }) }
+  const clearFilters = () => {
+    setCuisine(''); setDiet([]); setMaxprice(''); setHeadcount(''); setSource('')
+    if (lastQ) run(lastQ, { cuisine: '', diet: [], maxprice: '', headcount: '', source: '' })
+  }
   const toggleUnderstand = () => { const next = !understand; setUnderstand(next); if (lastQ) run(lastQ, { understand: next }) }
 
   const count = health?.counts?.[schema]
@@ -960,6 +964,13 @@ export default function App() {
   const qt = q.trim().toLowerCase()
   const histMatch = qt ? history.filter((h) => h.toLowerCase().includes(qt) && h.toLowerCase() !== qt).slice(0, 3) : []
   const showDrop = open && (qt === '' ? history.length > 0 : (sugg.length > 0 || histMatch.length > 0))
+  const activeFilters = schema !== 'dish' ? [] : [
+    cuisine && { id: 'cuisine', label: cuisine, onX: () => onCuisine('') },
+    ...diet.map((d) => ({ id: 'd-' + d, label: d, onX: () => toggleDiet(d) })),
+    maxprice && { id: 'price', label: `under $${maxprice}/head`, onX: () => onPrice('') },
+    headcount && { id: 'hc', label: `for ${headcount} people`, onX: () => onHeadcount('') },
+    source && { id: 'src', label: SRC_LABEL[source] || source, onX: () => onSource('') },
+  ].filter(Boolean)
 
   return (
     <div className="app">
@@ -992,10 +1003,16 @@ export default function App() {
 
       <div className="sticky-bar">
       <div className="searchwrap">
-        <input className="search" value={q} placeholder={cfg.placeholder}
-          onChange={(e) => { setQ(e.target.value); setOpen(true) }}
-          onKeyDown={(e) => { if (e.key === 'Enter') run() }}
-          onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)} />
+        <div className="search-field">
+          <input className="search" value={q} placeholder={cfg.placeholder}
+            onChange={(e) => { setQ(e.target.value); setOpen(true) }}
+            onKeyDown={(e) => { if (e.key === 'Enter') run() }}
+            onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)} />
+          {q && (
+            <button className="search-clear" type="button" aria-label="Clear search" title="Clear"
+              onMouseDown={(e) => { e.preventDefault(); setQ(''); setSugg([]); setOpen(true) }}>✕</button>
+          )}
+        </div>
         {(SpeechRec || CAN_RECORD) && (
           <button className={`mic ${listening ? 'on' : ''}`} onClick={toggleMic} type="button"
             title={listening ? 'Listening… click to stop' : 'Search by voice'}
@@ -1103,6 +1120,17 @@ export default function App() {
       {/* 2) the searches (results) */}
       {cols.length > 0 && (
         <>
+          {activeFilters.length > 0 && (
+            <div className="afilters">
+              <span className="af-lbl">Filtering by</span>
+              {activeFilters.map((f) => (
+                <button key={f.id} className="af-chip" onClick={f.onX} title={`Remove filter: ${f.label}`}>
+                  {f.label}<span className="af-x" aria-hidden="true">✕</span>
+                </button>
+              ))}
+              <button className="af-clear" onClick={clearFilters}>Clear all</button>
+            </div>
+          )}
           <div className="hl-legend">
             <span><mark className="hl-kw">keyword</mark> matched query word (BM25)</span>
             {understand && schema === 'dish' && <span><mark className="hl-sem">graph term</mark> added via the ontology (vector leg)</span>}
