@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 
 const API = 'http://localhost:8009'
+const PAGE_SIZE = 8              // results shown per page
+const FETCH_N = 48              // window fetched per column, paginated client-side
 const KIND_COLOR = { cuisine: '#00695c', allergen: '#c62828', diet: '#2e7d32', category: '#a15c00', ingredient: '#7c8698' }
 
 const INDEXES = {
@@ -96,16 +98,16 @@ function highlight(text, kw = [], sem = []) {
   return out
 }
 
-function Card({ hit, showScores, hl }) {
+function Card({ hit, showScores, hl, dish }) {
   const serves = typeof hit.serves === 'number' && hit.serves > 0 ? hit.serves : null
   const total = typeof hit.price === 'number' && hit.price > 0 ? Math.round(hit.price) : null
   const pp = typeof hit.price_pp === 'number' && hit.price_pp > 0 ? hit.price_pp.toFixed(2) : null
   const src = hit.source && SRC_LABEL[hit.source]
   const kw = hl?.kw || [], sem = hl?.sem || []
   return (
-    <div className="card">
-      <img className="food-img" src={foodImg(hit)} alt="" loading="lazy" aria-hidden="true"
-        onError={(e) => { const f = `${import.meta.env.BASE_URL}food/platter.jpg`; if (!e.target.src.endsWith('platter.jpg')) e.target.src = f; else e.target.style.display = 'none' }} />
+    <div className={`card${dish ? '' : ' card-noimg'}`}>
+      {dish && <img className="food-img" src={foodImg(hit)} alt="" loading="lazy" aria-hidden="true"
+        onError={(e) => { const f = `${import.meta.env.BASE_URL}food/platter.jpg`; if (!e.target.src.endsWith('platter.jpg')) e.target.src = f; else e.target.style.display = 'none' }} />}
       <div className="card-body">
         <div className="card-top">
           <span className="dish">{highlight(hit.name, kw, sem)}</span>
@@ -136,7 +138,7 @@ function Card({ hit, showScores, hl }) {
   )
 }
 
-function Column({ title, subtitle, ranking, accent, data, loading, showScores, hl, took, loadingLabel, stream, total }) {
+function Column({ title, subtitle, ranking, accent, data, loading, showScores, hl, took, loadingLabel, stream, total, dish }) {
   return (
     <div className="col">
       <div className="col-head" style={{ borderColor: accent }}>
@@ -161,8 +163,8 @@ function Column({ title, subtitle, ranking, accent, data, loading, showScores, h
       ) : loading ? (
         <div className="col-loading">{loadingLabel || 'searching…'}</div>
       ) : null}
-      {!loading && data && data.length === 0 && <div className="muted">No good matches.</div>}
-      {!loading && (data || []).map((h, i) => <Card key={`${h.name}-${i}`} hit={h} showScores={showScores} hl={hl} />)}
+      {!loading && total === 0 && <div className="muted">No good matches.</div>}
+      {!loading && (data || []).map((h, i) => <Card key={`${h.name}-${i}`} hit={h} showScores={showScores} hl={hl} dish={dish} />)}
     </div>
   )
 }
@@ -736,6 +738,7 @@ export default function App() {
   const [sugg, setSugg] = useState([])
   const [open, setOpen] = useState(false)
   const [cols, setCols] = useState([])    // progressive result columns (each fills independently)
+  const [page, setPage] = useState(0)     // client-side pagination over the fetched window
   const [concepts, setConcepts] = useState(null)
   const [graph, setGraph] = useState(null)
   const [health, setHealth] = useState(null)
@@ -777,7 +780,7 @@ export default function App() {
     setQ(term); setLastQ(term); setOpen(false); setConcepts(null); setGraph(null)
     const sp = (schema === 'dish' && src) ? `&source=${encodeURIComponent(src)}` : ''
     const fp = schema === 'dish' ? `&cuisine=${encodeURIComponent(c)}&dietary=${dt.join(',')}&maxprice=${mp}&headcount=${hc}` : ''
-    const url = (mode) => `${API}/api/search?schema=${schema}&mode=${mode}&q=${encodeURIComponent(term)}${sp}${fp}`
+    const url = (mode) => `${API}/api/search?schema=${schema}&mode=${mode}&q=${encodeURIComponent(term)}&hits=${FETCH_N}${sp}${fp}`
 
     // build the columns for this run (2, or 3 when understanding is on)
     const specs = [
@@ -789,6 +792,7 @@ export default function App() {
 
     // render all columns immediately in a loading state, then fill each as its fetch resolves
     setCols(specs.map((s) => ({ ...s, loading: true, data: null, resp: null, stream: '', phase: s.key === 'understood' ? 'understanding' : null })))
+    setPage(0)
     specs.forEach((s, i) => {
       const retrieve = () => fetch(url(s.mode)).then((r) => r.json()).then((resp) => {
         setCols((prev) => prev.map((col, ci) => (ci === i ? { ...col, loading: false, data: resp.hits || [], resp } : col)))
@@ -797,7 +801,7 @@ export default function App() {
 
       if (s.key === 'understood') {
         // one stream: tokens live → concepts → results (understanding + search run once, server-side)
-        const es = new EventSource(`${API}/api/understand_stream?q=${encodeURIComponent(term)}&hits=8${sp}${fp}`)
+        const es = new EventSource(`${API}/api/understand_stream?q=${encodeURIComponent(term)}&hits=${FETCH_N}${sp}${fp}`)
         let closed = false
         es.onmessage = (ev) => {
           let m; try { m = JSON.parse(ev.data) } catch { return }
@@ -806,7 +810,7 @@ export default function App() {
           else if (m.type === 'done') setCols((prev) => prev.map((c, ci) => (ci === i ? { ...c, phase: 'retrieving' } : c)))
           else if (m.type === 'results') {
             closed = true; es.close()
-            const resp = { concepts: m.concepts, graph: m.graph, debug: m.debug, timing: m.timing, hits: m.hits }
+            const resp = { concepts: m.concepts, graph: m.graph, debug: m.debug, timing: m.timing, hits: m.hits, total: m.total }
             setCols((prev) => prev.map((c, ci) => (ci === i ? { ...c, loading: false, data: m.hits || [], resp } : c)))
             setConcepts(m.concepts || null); setGraph(m.graph || null)
           }
@@ -954,13 +958,28 @@ export default function App() {
                 : { kw: qTokens, sem: [] }
               return (
                 <Column key={col.key} title={col.title} subtitle={col.subtitle} ranking={col.ranking}
-                  accent={col.accentKind === 'hero' ? cfg.accent : '#9aa0a6'} data={col.data} loading={col.loading}
-                  loadingLabel={col.key === 'understood' ? '🧠 understanding…' : 'searching…'}
+                  accent={col.accentKind === 'hero' ? cfg.accent : '#9aa0a6'}
+                  data={col.loading ? col.data : (col.data || []).slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE)}
+                  loading={col.loading} loadingLabel={col.key === 'understood' ? '🧠 understanding…' : 'searching…'}
                   stream={col.key === 'understood' ? { text: col.stream, phase: col.phase, cached: col.streamCached } : undefined}
-                  showScores={col.key !== 'keyword'} hl={hl} took={col.resp?.timing} total={col.resp?.total} />
+                  showScores={col.key !== 'keyword'} hl={hl} took={col.resp?.timing} total={col.resp?.total} dish={schema === 'dish'} />
               )
             })}
           </div>
+          {(() => {
+            const maxLen = Math.max(0, ...cols.map((c) => (c.data || []).length))
+            const pages = Math.ceil(maxLen / PAGE_SIZE)
+            if (pages <= 1) return null
+            return (
+              <div className="pager">
+                <button className="pg-btn arw" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))} aria-label="Previous page">←</button>
+                {Array.from({ length: pages }, (_, i) => (
+                  <button key={i} className={`pg-btn${i === page ? ' on' : ''}`} onClick={() => setPage(i)} aria-current={i === page ? 'page' : undefined}>{i + 1}</button>
+                ))}
+                <button className="pg-btn arw" disabled={page >= pages - 1} onClick={() => setPage((p) => Math.min(pages - 1, p + 1))} aria-label="Next page">→</button>
+              </div>
+            )
+          })()}
         </>
       )}
 
