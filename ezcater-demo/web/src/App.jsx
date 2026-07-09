@@ -739,6 +739,7 @@ export default function App() {
   const [open, setOpen] = useState(false)
   const [cols, setCols] = useState([])    // progressive result columns (each fills independently)
   const [page, setPage] = useState(0)     // client-side pagination over the fetched window
+  const resultsRef = useRef(null)         // scroll target so paging jumps back to the top
   const [concepts, setConcepts] = useState(null)
   const [graph, setGraph] = useState(null)
   const [health, setHealth] = useState(null)
@@ -821,6 +822,12 @@ export default function App() {
       }
     })
   }, [q, schema, cuisine, diet, maxprice, headcount, source, understand])
+
+  const goPage = (p) => {
+    setPage(p)
+    const rm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    resultsRef.current?.scrollIntoView({ behavior: rm ? 'auto' : 'smooth', block: 'start' })
+  }
 
   const switchIndex = (s) => {
     setSchema(s); setQ(''); setLastQ(''); setCols([]); setSugg([]); setConcepts(null); setGraph(null)
@@ -951,7 +958,7 @@ export default function App() {
             <span><mark className="hl-kw">keyword</mark> matched query word (BM25)</span>
             {understand && schema === 'dish' && <span><mark className="hl-sem">graph term</mark> added via the ontology (vector leg)</span>}
           </div>
-          <div className="cols" style={{ gridTemplateColumns: `repeat(${cols.length}, minmax(0, 1fr))` }}>
+          <div className="cols" ref={resultsRef} style={{ gridTemplateColumns: `repeat(${cols.length}, minmax(0, 1fr))` }}>
             {cols.map((col) => {
               const hl = col.key === 'understood'
                 ? { kw: tokenize(concepts?.free_text || lastQ), sem: graph?.added_terms || [] }
@@ -972,11 +979,11 @@ export default function App() {
             if (pages <= 1) return null
             return (
               <div className="pager">
-                <button className="pg-btn arw" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))} aria-label="Previous page">←</button>
+                <button className="pg-btn arw" disabled={page === 0} onClick={() => goPage(Math.max(0, page - 1))} aria-label="Previous page">←</button>
                 {Array.from({ length: pages }, (_, i) => (
-                  <button key={i} className={`pg-btn${i === page ? ' on' : ''}`} onClick={() => setPage(i)} aria-current={i === page ? 'page' : undefined}>{i + 1}</button>
+                  <button key={i} className={`pg-btn${i === page ? ' on' : ''}`} onClick={() => goPage(i)} aria-current={i === page ? 'page' : undefined}>{i + 1}</button>
                 ))}
-                <button className="pg-btn arw" disabled={page >= pages - 1} onClick={() => setPage((p) => Math.min(pages - 1, p + 1))} aria-label="Next page">→</button>
+                <button className="pg-btn arw" disabled={page >= pages - 1} onClick={() => goPage(Math.min(pages - 1, page + 1))} aria-label="Next page">→</button>
               </div>
             )
           })()}
