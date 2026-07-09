@@ -137,10 +137,11 @@ _UNDERSTAND_SYS = (
     "exclude_ingredients (array of specific NON-allergen ingredients the user does NOT want, lowercase, e.g. "
     "['pickles'] for 'no pickles', ['onion'] for 'without onions', ['cilantro'] for 'hold the cilantro'), "
     "spice_min (0-3 or null), "
-    "cuisine (one of Italian,Mexican,Japanese,Indian,Thai,Mediterranean,American,Chinese,Breakfast or null — "
-    "ONLY set this when the user NAMES the cuisine explicitly. Leave it null when they name a specific dish, "
-    "even if that dish belongs to a cuisine: 'pizza' -> null (NOT Italian), 'tacos' -> null (NOT Mexican), "
-    "'smoked brisket sliders' -> null. 'italian food' -> Italian), "
+    "cuisine (one of Italian,Mexican,Japanese,Indian,Thai,Mediterranean,American,Chinese,Breakfast or null). "
+    "Set it ONLY when the query's WORDS actually name the cuisine — and then set it even if a dish is also "
+    "named: 'italian pizza' -> Italian, 'mexican tacos' -> Mexican, 'thai green curry' -> Thai, "
+    "'italian food' -> Italian. If the query names ONLY a dish, leave it null even though that dish belongs "
+    "to a cuisine: 'pizza' -> null, 'tacos' -> null, 'smoked brisket sliders' -> null), "
     "occasion (array of: client,impressive,healthy,light,comfort,celebration,morning), "
     "include (array of ingredients/categories the user explicitly WANTS present, e.g. "
     "['meat'] for 'with meat', ['chicken'] for 'with chicken' — empty unless clearly requested. "
@@ -180,6 +181,17 @@ def _llm_query_on() -> bool:
     return bool(ingest_config and ingest_config.query_llm_enabled())
 
 
+def _normalize_cuisine(c: dict, q: str) -> dict:
+    """Cuisine is a CONTROLLED VOCABULARY governed by the user's literal words, not by LLM
+    inference. Two failure modes this closes: the LLM inventing a cuisine the user never typed
+    ("pizza" -> Italian, which then floods the vector query), and the LLM missing one they did
+    ("italian pizza" -> null). Word-boundary matched, so "americano" never yields American.
+    It also stops a cached cuisine leaking onto a different query."""
+    t = (q or "").lower()
+    c["cuisine"] = next((v.capitalize() for v in CUISINE_VOCAB if re.search(rf"\b{re.escape(v)}\b", t)), None)
+    return c
+
+
 def _cached_free_text(cached: dict, q: str) -> str:
     """Which text should we actually SEARCH for on a cache hit?
 
@@ -197,15 +209,15 @@ def understand(q: str) -> dict:
     """LLM-first (bounded by a SEMANTIC CACHE) when enabled; deterministic regex otherwise.
     The cache keys on the query's intent embedding, so paraphrases reuse one LLM answer."""
     if not _llm_query_on():
-        return understand_heuristic(q)
+        return _normalize_cuisine(understand_heuristic(q), q)
     if ingest_semcache is not None:
         cached = ingest_semcache.get(q)
         if cached is not None:
-            return {**cached, "free_text": _cached_free_text(cached, q), "cache": "hit"}
+            return _normalize_cuisine({**cached, "free_text": _cached_free_text(cached, q), "cache": "hit"}, q)
     result = understand_llm(q)
     if ingest_semcache is not None:
         ingest_semcache.put(q, result)
-    return {**result, "cache": "miss"}
+    return _normalize_cuisine({**result, "cache": "miss"}, q)
 
 
 @app.get("/api/understand")
@@ -232,12 +244,12 @@ def understand_stream(q: str = "", hits: int = 8, source: str = "",
             return
         # --- 1) get concepts (heuristic / cache hit / streamed LLM) ---
         if not _llm_query_on() or ingest_llm is None:
-            concepts = understand_heuristic(q)
+            concepts = _normalize_cuisine(understand_heuristic(q), q)
             yield _sse({"type": "cached", "concepts": concepts})
         else:
             cached = ingest_semcache.get(q) if ingest_semcache is not None else None
             if cached is not None:
-                concepts = {**cached, "free_text": _cached_free_text(cached, q), "cache": "hit"}
+                concepts = _normalize_cuisine({**cached, "free_text": _cached_free_text(cached, q), "cache": "hit"}, q)
                 yield _sse({"type": "cached", "concepts": concepts})
             else:
                 acc = ""
@@ -263,6 +275,7 @@ def understand_stream(q: str = "", hits: int = 8, source: str = "",
                 for k in ("dietary", "exclude_allergens", "exclude_ingredients", "cuisine", "occasion", "include", "max_price_pp", "headcount", "spice_min"):
                     if k not in concepts:  # backfill omitted keys only; respect deliberate LLM null/[]
                         concepts[k] = h.get(k)
+                _normalize_cuisine(concepts, q)   # cuisine comes from the user's words, not inference
                 if ingest_semcache is not None:
                     ingest_semcache.put(q, {k: v for k, v in concepts.items() if not str(k).startswith("_")})
                 yield _sse({"type": "done", "concepts": concepts})
@@ -710,11 +723,31 @@ def _understood_run(concepts: dict, hits: int, source: str = "", extra: str = ""
             "vespa_ms": vespa_ms, "total": resp.get("root", {}).get("fields", {}).get("totalCount", 0)}
 
 
+def _browse(schema: str, hits: int, extra: str) -> dict:
+    """No query, just hard filters — browse the filtered catalog. There is no BM25 or vector
+    signal to rank on, so this is a match-all + filters scan returned unranked."""
+    yql = f"select * from {schema} where true{extra} limit {hits}"
+    t0 = time.perf_counter()
+    try:
+        resp = _vespa({"yql": yql, "ranking": "unranked"})
+    except Exception as e:  # noqa: BLE001
+        return {"mode": "browse", "hits": [], "error": str(e)}
+    ms = round((time.perf_counter() - t0) * 1000, 1)
+    return {"mode": "browse", "hits": _dedupe(_hits(schema, resp), hits), "concepts": None,
+            "applied_filters": [c.strip() for c in extra.split(" and ") if c.strip()], "graph": None,
+            "debug": {"yql": yql, "ranking": "unranked", "keyword_query": None, "vector_query": None},
+            "timing": {"total_ms": ms, "vespa_ms": ms, "understand_ms": None},
+            "total": resp.get("root", {}).get("fields", {}).get("totalCount", 0)}
+
+
 @app.get("/api/search")
 def search(q: str = "", mode: str = "hybrid", schema: str = "dish", hits: int = 8, source: str = "",
            cuisine: str = "", dietary: str = "", maxprice: str = "", headcount: str = ""):
-    if schema not in SCHEMAS or not q.strip():
+    if schema not in SCHEMAS:
         return {"mode": mode, "hits": []}
+    if not q.strip():   # filters with no query -> browse the filtered catalog
+        only_filters = _src_filter(source, schema) + _facet_filter(schema, cuisine, dietary, maxprice, headcount)
+        return _browse(schema, hits, only_filters) if only_filters else {"mode": mode, "hits": []}
     fetch = hits * 8
     t_start = time.perf_counter()
     # understood: understand ONCE, then delegate to the shared helper (also used by the stream)

@@ -794,11 +794,14 @@ export default function App() {
 
   const run = useCallback((query, opts = {}) => {
     const term = (query ?? q).trim()
-    if (!term) return
     const c = opts.cuisine ?? cuisine, dt = opts.diet ?? diet, mp = opts.maxprice ?? maxprice, hc = opts.headcount ?? headcount
     const src = opts.source ?? source, und = opts.understand ?? understand
-    setQ(term); setLastQ(term); setOpen(false); setConcepts(null); setGraph(null)
-    setHistory((prev) => {   // record in recent searches (most-recent first, deduped, capped)
+    // filters with no query still browse the catalog; nothing at all clears the results
+    const hasFacets = schema === 'dish' && !!(c || dt.length || mp || hc || src)
+    if (!term && !hasFacets) { setCols([]); setLastQ(''); setConcepts(null); setGraph(null); return }
+    if (term) setQ(term)
+    setLastQ(term); setOpen(false); setConcepts(null); setGraph(null)
+    if (term) setHistory((prev) => {   // record in recent searches (most-recent first, deduped, capped)
       const next = [term, ...prev.filter((x) => x.toLowerCase() !== term.toLowerCase())].slice(0, 12)
       try { localStorage.setItem('ezc_history', JSON.stringify(next)) } catch { /* */ }
       return next
@@ -807,12 +810,14 @@ export default function App() {
     const fp = schema === 'dish' ? `&cuisine=${encodeURIComponent(c)}&dietary=${dt.join(',')}&maxprice=${mp}&headcount=${hc}` : ''
     const url = (mode) => `${API}/api/search?schema=${schema}&mode=${mode}&q=${encodeURIComponent(term)}&hits=${FETCH_N}${sp}${fp}`
 
-    // build the columns for this run (2, or 3 when understanding is on)
-    const specs = [
-      { key: 'keyword', mode: 'keyword', title: 'Keyword', subtitle: 'BM25 — exact words', ranking: 'BM25', accentKind: 'muted' },
-      { key: 'hybrid', mode: 'hybrid', title: 'AI Hybrid', subtitle: 'keyword + meaning', ranking: 'RRF(BM25, vector)', accentKind: (und && schema === 'dish') ? 'muted' : 'hero' },
-    ]
-    if (und && schema === 'dish')
+    // no query -> a single "Browse" column of the filtered catalog; otherwise the comparison columns
+    const specs = !term
+      ? [{ key: 'browse', mode: 'browse', title: 'Browse', subtitle: 'filters only — no search query', ranking: null, accentKind: 'hero' }]
+      : [
+        { key: 'keyword', mode: 'keyword', title: 'Keyword', subtitle: 'BM25 — exact words', ranking: 'BM25', accentKind: 'muted' },
+        { key: 'hybrid', mode: 'hybrid', title: 'AI Hybrid', subtitle: 'keyword + meaning', ranking: 'RRF(BM25, vector)', accentKind: (und && schema === 'dish') ? 'muted' : 'hero' },
+      ]
+    if (term && und && schema === 'dish')
       specs.push({ key: 'understood', mode: 'understood', title: 'Query understanding', subtitle: 'NL → filters + graph', ranking: 'RRF(BM25, vector) + hard filters', accentKind: 'hero' })
 
     // render all columns immediately in a loading state, then fill each as its fetch resolves
@@ -946,14 +951,15 @@ export default function App() {
     setSchema(s); setQ(''); setLastQ(''); setCols([]); setSugg([]); setConcepts(null); setGraph(null)
     setCuisine(''); setDiet([]); setMaxprice(''); setHeadcount(''); setSource(''); setUnderstand(false)
   }
-  const toggleDiet = (d) => { const next = diet.includes(d) ? diet.filter((x) => x !== d) : [...diet, d]; setDiet(next); if (lastQ) run(lastQ, { diet: next }) }
-  const onCuisine = (v) => { setCuisine(v); if (lastQ) run(lastQ, { cuisine: v }) }
-  const onPrice = (v) => { setMaxprice(v); if (lastQ) run(lastQ, { maxprice: v }) }
-  const onHeadcount = (v) => { setHeadcount(v); if (lastQ) run(lastQ, { headcount: v }) }
-  const onSource = (v) => { setSource(v); if (lastQ) run(lastQ, { source: v }) }
+  // filters re-run even with an empty query — that browses the filtered catalog
+  const toggleDiet = (d) => { const next = diet.includes(d) ? diet.filter((x) => x !== d) : [...diet, d]; setDiet(next); run(lastQ, { diet: next }) }
+  const onCuisine = (v) => { setCuisine(v); run(lastQ, { cuisine: v }) }
+  const onPrice = (v) => { setMaxprice(v); run(lastQ, { maxprice: v }) }
+  const onHeadcount = (v) => { setHeadcount(v); run(lastQ, { headcount: v }) }
+  const onSource = (v) => { setSource(v); run(lastQ, { source: v }) }
   const clearFilters = () => {
     setCuisine(''); setDiet([]); setMaxprice(''); setHeadcount(''); setSource('')
-    if (lastQ) run(lastQ, { cuisine: '', diet: [], maxprice: '', headcount: '', source: '' })
+    run(lastQ, { cuisine: '', diet: [], maxprice: '', headcount: '', source: '' })
   }
   const toggleUnderstand = () => { const next = !understand; setUnderstand(next); if (lastQ) run(lastQ, { understand: next }) }
 
@@ -1131,10 +1137,12 @@ export default function App() {
               <button className="af-clear" onClick={clearFilters}>Clear all</button>
             </div>
           )}
-          <div className="hl-legend">
-            <span><mark className="hl-kw">keyword</mark> matched query word (BM25)</span>
-            {understand && schema === 'dish' && <span><mark className="hl-sem">graph term</mark> added via the ontology (vector leg)</span>}
-          </div>
+          {cols[0]?.key !== 'browse' && (
+            <div className="hl-legend">
+              <span><mark className="hl-kw">keyword</mark> matched query word (BM25)</span>
+              {understand && schema === 'dish' && <span><mark className="hl-sem">graph term</mark> added via the ontology (vector leg)</span>}
+            </div>
+          )}
           <div className="cols" ref={resultsRef} style={{ gridTemplateColumns: `repeat(${cols.length}, minmax(0, 1fr))` }}>
             {cols.map((col) => {
               const hl = col.key === 'understood'

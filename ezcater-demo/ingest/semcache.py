@@ -28,7 +28,12 @@ _PATH = Path(__file__).resolve().parent.parent / "data" / ".semcache.json"
 # (diet / protein / allergen), after light plural + synonym normalization. Spice/price/occasion
 # differences are ignored (minor). Erring toward a miss is safe (it just re-calls the LLM).
 _GUARD_VOCAB = {"nut", "gluten", "dairy", "cheese", "egg", "soy", "shellfish", "fish", "sesame",
-                "meat", "vegan", "vegetarian", "pescatarian", "halal", "kosher"}
+                "meat", "vegan", "vegetarian", "pescatarian", "halal", "kosher",
+                # a named CUISINE and a SPICE request both change the extracted concepts, so they
+                # must change the signature too — otherwise "italian pizza" reuses "pizza".
+                "italian", "mexican", "japanese", "indian", "thai", "mediterranean", "american",
+                "chinese", "korean", "greek", "french", "spanish", "vietnamese", "breakfast",
+                "spicy", "mild"}
 _GUARD_SYN = {"nuts": "nut", "peanut": "nut", "peanuts": "nut", "eggs": "egg", "cheeses": "cheese",
               "plant": "vegan", "plantbased": "vegan", "veggie": "vegetarian",
               "beef": "meat", "chicken": "meat", "pork": "meat", "lamb": "meat", "turkey": "meat",
