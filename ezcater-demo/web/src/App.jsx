@@ -826,7 +826,11 @@ export default function App() {
   const goPage = (p) => {
     setPage(p)
     const rm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    resultsRef.current?.scrollIntoView({ behavior: rm ? 'auto' : 'smooth', block: 'start' })
+    const el = resultsRef.current
+    if (!el) return
+    const barH = document.querySelector('.sticky-bar')?.getBoundingClientRect().height || 0
+    const top = el.getBoundingClientRect().top + window.scrollY - barH - 12  // land just below the frozen bar
+    window.scrollTo({ top: Math.max(0, top), behavior: rm ? 'auto' : 'smooth' })
   }
 
   const switchIndex = (s) => {
@@ -874,6 +878,7 @@ export default function App() {
         ))}
       </div>
 
+      <div className="sticky-bar">
       <div className="searchwrap">
         <input className="search" value={q} placeholder={cfg.placeholder}
           onChange={(e) => { setQ(e.target.value); setOpen(true) }}
@@ -918,6 +923,7 @@ export default function App() {
           )}
         </div>
       )}
+      </div>
 
       {cfg.filters && (
         <div className="understand-row">

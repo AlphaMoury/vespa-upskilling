@@ -40,6 +40,12 @@ body{margin:0;color:var(--ink);min-height:100vh;background-attachment:fixed;
 .idx-count{margin-left:auto;font-size:12px;color:var(--muted)}
 
 /* search */
+/* frozen search + filters bar */
+.sticky-bar{position:sticky;top:0;z-index:30;background:rgba(244,246,250,.93);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  padding:10px 0 9px;margin:0 0 6px;box-shadow:0 8px 20px -14px rgba(20,25,40,.28)}
+.sticky-bar .searchwrap{margin-bottom:0}
+.sticky-bar .filters{margin:11px 0 0}
 .searchwrap{position:relative;display:flex;gap:11px;margin-bottom:16px}
 .search{flex:1;font-size:17px;padding:16px 20px;border:1.5px solid var(--line);border-radius:16px;
   background:var(--card);outline:none;transition:.18s;box-shadow:var(--shadow-sm)}
