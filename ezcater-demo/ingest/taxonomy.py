@@ -15,6 +15,25 @@ import re
 # ---- major allergens we track (subset of the 14 regulated) ----
 ALLERGENS = ["gluten", "dairy", "eggs", "nuts", "peanuts", "soy", "shellfish", "fish", "sesame"]
 
+# The LLM's substring traps: names that LOOK like an allergen but aren't, plus "may contain"
+# guesses asserted as fact. Allergen labels are safety-critical, so the deterministic layer
+# VETOES these — a hallucinated edge never reaches a dish's allergens[]. Small and auditable:
+# every entry is a claim a human reviewed and rejected.
+ALLERGEN_FALSE_POSITIVES: set[tuple[str, str]] = {
+    ("shells", "shellfish"),              # pasta shells, not a mollusc
+    ("nutmeg", "nuts"),                   # a spice; the substring "nut" is the trap
+    ("shrimp", "fish"),                   # shrimp is shellfish, not fish
+    ("jumbo shrimp", "fish"),
+    # "may contain nuts" asserted as "contains nuts" — this wrongly empties a nut-free dessert search
+    ("cookie", "nuts"),
+    ("brownies", "nuts"),
+    ("chocolate chips", "nuts"),
+    ("dark chocolate", "nuts"),
+    ("german chocolate", "nuts"),
+    ("german chocolate square", "nuts"),
+    ("granola-type cereal", "nuts"),
+}
+
 # ingredient token -> allergens it implies
 INGREDIENT_ALLERGENS: dict[str, set[str]] = {
     # gluten

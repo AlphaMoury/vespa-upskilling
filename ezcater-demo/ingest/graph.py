@@ -35,16 +35,27 @@ from .config import index_llm_enabled
 _PATH = Path(__file__).resolve().parent.parent / "data" / "ontology_graph.json"
 
 # cuisine -> representative ingredients/dishes (seed for query-time expansion)
+# cuisine -> representative ingredients AND signature dishes. The dishes matter: an explicit
+# "italian food" query should reach pizza/lasagna, not just the ingredient list.
 CUISINE_FEATURES = {
-    "italian": ["pasta", "mozzarella", "basil", "parmesan", "tomato", "pesto", "risotto"],
-    "mexican": ["tortilla", "beans", "avocado", "salsa", "guacamole", "cilantro", "carnitas"],
-    "japanese": ["sushi", "rice", "teriyaki", "edamame", "miso", "tempura"],
-    "indian": ["curry", "paneer", "chickpea", "tikka", "masala", "naan", "lentil"],
-    "thai": ["curry", "coconut", "peanut", "noodle", "lemongrass", "satay", "tofu"],
-    "mediterranean": ["hummus", "falafel", "tahini", "feta", "olive", "pita", "tabbouleh"],
-    "american": ["burger", "bbq", "cheese", "fried", "mac", "pulled pork"],
-    "chinese": ["noodle", "tofu", "dumpling", "fried rice", "soy sauce", "kung pao"],
-    "breakfast": ["bagel", "egg", "yogurt", "granola", "avocado", "fruit", "frittata"],
+    "italian": ["pasta", "mozzarella", "basil", "parmesan", "tomato", "pesto", "risotto",
+                "pizza", "lasagna", "gnocchi", "ravioli", "prosciutto", "focaccia", "tiramisu", "bruschetta"],
+    "mexican": ["tortilla", "beans", "avocado", "salsa", "guacamole", "cilantro", "carnitas",
+                "taco", "burrito", "quesadilla", "enchilada", "elote", "barbacoa", "queso", "jalapeno"],
+    "japanese": ["sushi", "rice", "teriyaki", "edamame", "miso", "tempura",
+                 "ramen", "sashimi", "udon", "nori", "tonkatsu", "wasabi", "poke"],
+    "indian": ["curry", "paneer", "chickpea", "tikka", "masala", "naan", "lentil",
+               "samosa", "biryani", "tandoori", "raita", "chutney", "korma", "dal"],
+    "thai": ["curry", "coconut", "peanut", "noodle", "lemongrass", "satay", "tofu",
+             "pad thai", "tom yum", "papaya salad", "sticky rice", "galangal"],
+    "mediterranean": ["hummus", "falafel", "tahini", "feta", "olive", "pita", "tabbouleh",
+                      "shawarma", "kebab", "couscous", "tzatziki", "baba ganoush", "dolma", "chickpea"],
+    "american": ["burger", "bbq", "cheese", "fried", "mac", "pulled pork",
+                 "slider", "brisket", "mac and cheese", "cornbread", "coleslaw", "wings", "ribs", "meatloaf"],
+    "chinese": ["noodle", "tofu", "dumpling", "fried rice", "soy sauce", "kung pao",
+                "wonton", "bao", "chow mein", "spring roll", "szechuan", "lo mein"],
+    "breakfast": ["bagel", "egg", "yogurt", "granola", "avocado", "fruit", "frittata",
+                  "pancake", "waffle", "omelet", "bacon", "hash brown", "french toast", "oatmeal"],
 }
 
 # a positive-inclusion category (from concepts.include) -> member ingredients/dishes, so
@@ -120,12 +131,30 @@ class OntologyGraph:
             self.add_ingredient(ing, diets_violated=("vegan", "vegetarian"))
         for ing in taxonomy.ANIMAL_NONMEAT:
             self.add_ingredient(ing, diets_violated=("vegan",))
+        self.seed_cuisines()
+        self.seed_categories()
+        return self
+
+    def seed_cuisines(self):
+        """Cuisine nodes + FEATURES edges to their representative ingredients/dishes.
+        Idempotent, and called on every load — so widening CUISINE_FEATURES reaches graphs
+        that were already persisted (that's how 'pizza' joins Italian without a rebuild)."""
         for cuisine, feats in CUISINE_FEATURES.items():
             cnode = self._node(cuisine, "cuisine")
             for f in feats:
                 self._edge(cnode, self._node(f, "ingredient"), "FEATURES")
-        self.seed_categories()
         return self
+
+    def prune_bad_allergens(self) -> int:
+        """Delete CONTAINS edges the curated denylist marks as LLM false positives — 'shells'
+        is pasta, not a mollusc; 'nutmeg' is a spice. Safety labels stay deterministic."""
+        removed = 0
+        for ing, allergen in taxonomy.ALLERGEN_FALSE_POSITIVES:
+            a, b = f"ingredient:{ing}", f"allergen:{allergen}"
+            if self.g.has_edge(a, b):
+                self.g.remove_edge(a, b)
+                removed += 1
+        return removed
 
     def seed_categories(self):
         """Add positive-inclusion CATEGORY nodes (meat, seafood, …) with MEMBER edges to their
@@ -171,7 +200,9 @@ class OntologyGraph:
         allergens, diets, cat = set(), set(), None
         if index_llm_enabled():
             data = llm.chat_json(_LLM_SYS, f"Ingredient: {name}") or {}
-            allergens = {a for a in data.get("allergens", []) if a in taxonomy.ALLERGENS}
+            low = name.lower().strip()
+            allergens = {a for a in data.get("allergens", []) if a in taxonomy.ALLERGENS
+                         and (low, a) not in taxonomy.ALLERGEN_FALSE_POSITIVES}
             diets = {d for d in data.get("diets_violated", []) if d in ("vegan", "vegetarian")}
             cat = data.get("category")
         if not allergens:                                  # deterministic fallback / backstop
@@ -277,7 +308,9 @@ class OntologyGraph:
             try:
                 g = nx.node_link_graph(json.loads(path.read_text()), directed=True, edges="edges")
                 og = cls(g).seed_categories()      # ensure the seed category nodes exist
+                og.seed_cuisines()                 # pick up any newly-added cuisine features
                 og.materialize_categories()        # connect LLM-classified ingredients (no orphans)
+                og.prune_bad_allergens()           # veto known LLM allergen false positives
                 return og
             except Exception:  # noqa: BLE001
                 pass

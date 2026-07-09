@@ -31,10 +31,14 @@ def _rank_profiles(text_fields):
                     functions=[Function(name="bm25sum", expression=bm25sum)], first_phase="bm25sum"),
         RankProfile(name="semantic", inputs=[("query(q)", f"tensor<float>(x[{EMBED_DIM}])")],
                     first_phase="closeness(field, embedding)"),
+        # First-phase must not zero-out docs the vector leg never retrieved: a pure BM25 match has
+        # closeness ~0, so a closeness-only first phase can cut an EXACT keyword hit before it ever
+        # reaches the global-phase fusion. Normalize bm25 into (0,1) and take the max so BOTH legs'
+        # candidates survive into RRF. (Rank-profile change only -> redeploy, no reindex.)
         RankProfile(name="hybrid", inherits="bm25", inputs=[("query(q)", f"tensor<float>(x[{EMBED_DIM}])")],
-                    first_phase="closeness(field, embedding)",
+                    first_phase="max(closeness(field, embedding), bm25sum / (1.0 + bm25sum))",
                     global_phase=GlobalPhaseRanking(
-                        expression="reciprocal_rank_fusion(bm25sum, closeness(field, embedding))", rerank_count=200),
+                        expression="reciprocal_rank_fusion(bm25sum, closeness(field, embedding))", rerank_count=400),
                     match_features=["bm25sum", "closeness(field, embedding)"]),
     ]
 
