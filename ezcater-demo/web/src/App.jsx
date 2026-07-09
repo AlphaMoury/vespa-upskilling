@@ -743,6 +743,7 @@ export default function App() {
   const [page, setPage] = useState(0)     // client-side pagination over the fetched window
   const resultsRef = useRef(null)         // scroll target so paging jumps back to the top
   const [listening, setListening] = useState(false)   // voice search
+  const [micMsg, setMicMsg] = useState('')            // voice status / error feedback
   const recRef = useRef(null)
   const [concepts, setConcepts] = useState(null)
   const [graph, setGraph] = useState(null)
@@ -837,31 +838,44 @@ export default function App() {
     window.scrollTo({ top: Math.max(0, top), behavior: rm ? 'auto' : 'smooth' })
   }
 
-  // voice search: browser-native speech-to-text with live interim transcription; runs the
-  // search when you stop speaking. No server, no API key.
+  // voice search: browser-native speech-to-text with live interim transcription; auto-runs
+  // the search a moment after you stop speaking. No server, no API key.
   const toggleMic = () => {
     if (listening) { recRef.current?.stop(); return }
-    if (!SpeechRec) return
+    if (!SpeechRec) { setMicMsg('Voice search needs Chrome, Edge, or Safari.'); return }
     const rec = new SpeechRec()
-    rec.lang = 'en-US'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1
-    let finalText = ''
+    rec.lang = 'en-US'; rec.interimResults = true; rec.continuous = true; rec.maxAlternatives = 1
+    let finalText = '', silence
+    const armSilence = () => { clearTimeout(silence); silence = setTimeout(() => { try { rec.stop() } catch { /* */ } }, 1600) }
+    rec.onstart = () => { setListening(true); setMicMsg('Listening… speak now') }
+    rec.onspeechstart = () => setMicMsg('Listening…')
     rec.onresult = (e) => {
       let interim = ''
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const t = e.results[i][0].transcript
-        if (e.results[i].isFinal) finalText += t; else interim += t
+        if (e.results[i].isFinal) finalText += t + ' '; else interim += t
       }
       setQ((finalText + interim).replace(/\s+/g, ' ').trim())   // live update as you speak
-      setOpen(false)
+      setMicMsg(''); setOpen(false)
+      armSilence()                                              // stop shortly after you go quiet
     }
-    rec.onerror = () => { setListening(false); recRef.current = null }
+    rec.onerror = (e) => {
+      clearTimeout(silence)
+      const M = { 'not-allowed': 'Microphone blocked — allow mic access for this site, then retry.',
+        'service-not-allowed': 'Microphone blocked by the browser/OS settings.',
+        'no-speech': 'No speech detected — check your mic is picking up sound, then retry.',
+        'audio-capture': 'No microphone found — check your input device.',
+        'network': 'Speech service unreachable — voice needs an internet connection.' }
+      setMicMsg(M[e.error] || `Voice error: ${e.error}`)
+    }
     rec.onend = () => {
-      setListening(false); recRef.current = null
+      clearTimeout(silence); setListening(false); recRef.current = null
       const t = finalText.replace(/\s+/g, ' ').trim()
-      if (t) run(t)                                             // auto-search when you stop
+      if (t) { setMicMsg(''); run(t) }                          // auto-search when you stop
     }
-    recRef.current = rec; setListening(true)
-    try { rec.start() } catch { setListening(false); recRef.current = null }
+    recRef.current = rec
+    setListening(true); setMicMsg('Starting…')
+    try { rec.start() } catch (err) { setListening(false); recRef.current = null; setMicMsg('Could not start voice input — ' + err.message) }
   }
 
   const switchIndex = (s) => {
@@ -931,6 +945,7 @@ export default function App() {
           </div>
         )}
       </div>
+      {micMsg && <div className={`mic-msg${listening ? ' live' : ''}`}>{listening && <span className="mic-dot" />}{micMsg}</div>}
 
       {cfg.filters && (
         <div className="filters">
