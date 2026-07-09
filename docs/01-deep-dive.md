@@ -393,7 +393,7 @@ Verified adopters (named on vespa.ai's own case studies — present the vendor-r
 | **BM25** | The standard lexical relevance score (`bm25(field)`). |
 | **Hybrid search** | Lexical + vector retrieval in one query, fused in ranking (e.g. RRF). |
 | **YQL** | Vespa's SQL-like query language. |
-| **RRF** | Reciprocal Rank Fusion — combine rankings by position, not raw score. |
+| **** | Reciprocal Rank Fusion — combine rankings by position, not raw score. |
 | **RAGSearcher** | Built-in component that does retrieval → prompt → LLM → streamed answer. |
 | **Partial update** | In-memory write to an attribute; searchable instantly. |
 

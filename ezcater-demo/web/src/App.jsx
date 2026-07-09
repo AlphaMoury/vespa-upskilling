@@ -746,6 +746,9 @@ export default function App() {
   const [schema, setSchema] = useState('dish')
   const [q, setQ] = useState('')
   const [lastQ, setLastQ] = useState('')
+  const [history, setHistory] = useState(() => {   // recent searches, persisted in localStorage
+    try { return JSON.parse(localStorage.getItem('ezc_history') || '[]') } catch { return [] }
+  })
   const [sugg, setSugg] = useState([])
   const [open, setOpen] = useState(false)
   const [cols, setCols] = useState([])    // progressive result columns (each fills independently)
@@ -795,6 +798,11 @@ export default function App() {
     const c = opts.cuisine ?? cuisine, dt = opts.diet ?? diet, mp = opts.maxprice ?? maxprice, hc = opts.headcount ?? headcount
     const src = opts.source ?? source, und = opts.understand ?? understand
     setQ(term); setLastQ(term); setOpen(false); setConcepts(null); setGraph(null)
+    setHistory((prev) => {   // record in recent searches (most-recent first, deduped, capped)
+      const next = [term, ...prev.filter((x) => x.toLowerCase() !== term.toLowerCase())].slice(0, 12)
+      try { localStorage.setItem('ezc_history', JSON.stringify(next)) } catch { /* */ }
+      return next
+    })
     const sp = (schema === 'dish' && src) ? `&source=${encodeURIComponent(src)}` : ''
     const fp = schema === 'dish' ? `&cuisine=${encodeURIComponent(c)}&dietary=${dt.join(',')}&maxprice=${mp}&headcount=${hc}` : ''
     const url = (mode) => `${API}/api/search?schema=${schema}&mode=${mode}&q=${encodeURIComponent(term)}&hits=${FETCH_N}${sp}${fp}`
@@ -917,6 +925,10 @@ export default function App() {
     try { rec.start() } catch { recRef.current = null; startWhisper() }
   }
 
+  const saveHistory = (next) => { setHistory(next); try { next.length ? localStorage.setItem('ezc_history', JSON.stringify(next)) : localStorage.removeItem('ezc_history') } catch { /* */ } }
+  const removeHistory = (term) => saveHistory(history.filter((x) => x !== term))
+  const clearHistory = () => saveHistory([])
+
   const toggleMic = () => {
     if (listening) {
       if (mediaRef.current) { try { mediaRef.current.rec.stop() } catch { /* */ } }
@@ -945,6 +957,9 @@ export default function App() {
   const qTokens = tokenize(lastQ)
   const llm = health?.llm_status
   const srcEntries = Object.entries(sourceOpts).filter(([k]) => k && k !== '(none)').sort()
+  const qt = q.trim().toLowerCase()
+  const histMatch = qt ? history.filter((h) => h.toLowerCase().includes(qt) && h.toLowerCase() !== qt).slice(0, 3) : []
+  const showDrop = open && (qt === '' ? history.length > 0 : (sugg.length > 0 || histMatch.length > 0))
 
   return (
     <div className="app">
@@ -991,9 +1006,29 @@ export default function App() {
           </button>
         )}
         <button className="go" style={{ background: cfg.accent }} onClick={() => run()}>Search</button>
-        {open && sugg.length > 0 && (
+        {showDrop && (
           <div className="suggest">
-            {sugg.map((s, i) => <div key={i} className="sg" onMouseDown={() => run(s.name)}><span className="sg-name">{s.name}</span></div>)}
+            {qt === '' && (
+              <div className="sg-hd"><span>Recent searches</span>
+                <button className="sg-clear" onMouseDown={(e) => { e.preventDefault(); clearHistory() }}>Clear</button></div>
+            )}
+            {(qt === '' ? history : histMatch).map((h) => (
+              <div key={'h' + h} className="sg">
+                <button className="sg-main" onMouseDown={() => run(h)}><span className="sg-hic">🕘</span><span className="sg-name">{h}</span></button>
+                <button className="sg-x" onMouseDown={(e) => { e.preventDefault(); removeHistory(h) }} title="Remove from history" aria-label={`Remove ${h}`}>✕</button>
+              </div>
+            ))}
+            {qt !== '' && sugg.map((s, i) => (
+              <div key={i} className="sg">
+                <button className="sg-main" onMouseDown={() => run(s.name)}>
+                  {schema === 'dish'
+                    ? <img className="sg-img" src={foodImg({ name: s.name })} alt="" aria-hidden="true"
+                        onError={(e) => { const f = `${import.meta.env.BASE_URL}food/platter.jpg`; if (!e.target.src.endsWith('platter.jpg')) e.target.src = f; else e.target.style.visibility = 'hidden' }} />
+                    : <span className="sg-hic">🔍</span>}
+                  <span className="sg-name">{s.name}</span>
+                </button>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -1056,6 +1091,7 @@ export default function App() {
         </div>
         {count != null && <span className="idx-count">{count.toLocaleString()} {cfg.unit} indexed</span>}
       </div>
+
 
       {/* 1) reasoning first: what was understood + how the search works (above results, as before) */}
       {understand && schema === 'dish' && concepts && <UnderstandPanel concepts={concepts} graph={graph} llmRaw={cols.find((c) => c.key === 'understood')?.stream} />}
