@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 
-const API = 'http://localhost:8009'
+const API = 'http://localhost:8009'    // Python ML sidecar: search, understand, graph, upload (cutover in progress)
+const GO_API = 'http://localhost:8090' // Go search-api: typeahead (first endpoint through the Go layer)
 const PAGE_SIZE = 8              // results shown per page
 const FETCH_N = 48              // window fetched per column, paginated client-side
 // native browser speech-to-text (Chrome/Edge); falls back to server Whisper when the
@@ -168,9 +169,9 @@ function Column({ title, subtitle, ranking, accent, data, loading, showScores, h
         stream.phase === 'retrieving' ? <div className="col-loading">ranking in Vespa…</div>
           : stream.cached ? <div className="stream-cache">⚡ reused from cache — no LLM call</div>
             : <div className="stream-box">
-                <div className="stream-lbl">🧠 LLM generating concepts…</div>
-                <pre className="stream-json">{stream.text}<span className="stream-cursor">▍</span></pre>
-              </div>
+              <div className="stream-lbl">🧠 LLM generating concepts…</div>
+              <pre className="stream-json">{stream.text}<span className="stream-cursor">▍</span></pre>
+            </div>
       ) : loading ? (
         <div className="col-loading">{loadingLabel || 'searching…'}</div>
       ) : null}
@@ -512,7 +513,7 @@ function UploadMenu({ onDone }) {
       const fd = new FormData(); fd.append('file', f)
       const resp = await fetch(`${API}/api/upload_pdf`, { method: 'POST', body: fd })
       const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = ''
-      for (;;) {
+      for (; ;) {
         const { done, value } = await reader.read()
         if (done) break
         buf += dec.decode(value, { stream: true })
@@ -627,7 +628,7 @@ function GraphExplorer() {
     expanded.current.add(id)
     return fetch(`${API}/api/graph/neighbors?node=${encodeURIComponent(id)}`).then((r) => r.json()).then((d) => {
       nodes.update((d.nodes || []).map(toVisNode)); edges.update((d.edges || []).map(toVisEdge))
-    }).catch(() => {})
+    }).catch(() => { })
   }
   const collapse = (id) => {
     const nodes = nodesDS.current, edges = edgesDS.current
@@ -664,7 +665,7 @@ function GraphExplorer() {
       fetch(`${API}/api/graph/roots`).then((r) => r.json()).then((d) => {
         nodes.add((d.nodes || []).map(toVisNode)); setStats(d.stats)
         setTimeout(() => net.current?.fit?.({ animation: { duration: 500 } }), 300)
-      }).catch(() => {})
+      }).catch(() => { })
     })
     return () => { dead = true; net.current?.destroy?.() }
   }, [])
@@ -786,7 +787,7 @@ export default function App() {
   useEffect(() => {
     if (!q.trim()) { setSugg([]); return }
     const t = setTimeout(() => {
-      fetch(`${API}/api/typeahead?schema=${schema}&q=${encodeURIComponent(q)}`)
+      fetch(`${GO_API}/v1/typeahead?schema=${schema}&q=${encodeURIComponent(q)}`)
         .then((r) => r.json()).then((d) => setSugg(d.suggestions || [])).catch(() => setSugg([]))
     }, 110)
     return () => clearTimeout(t)
@@ -1008,86 +1009,86 @@ export default function App() {
       </div>
 
       <div className="sticky-bar">
-      <div className="searchwrap">
-        <div className="search-field">
-          <input className="search" value={q} placeholder={cfg.placeholder}
-            onChange={(e) => { setQ(e.target.value); setOpen(true) }}
-            onKeyDown={(e) => { if (e.key === 'Enter') run() }}
-            onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)} />
-          {q && (
-            <button className="search-clear" type="button" aria-label="Clear search" title="Clear"
-              onMouseDown={(e) => { e.preventDefault(); setQ(''); setSugg([]); setOpen(true) }}>✕</button>
+        <div className="searchwrap">
+          <div className="search-field">
+            <input className="search" value={q} placeholder={cfg.placeholder}
+              onChange={(e) => { setQ(e.target.value); setOpen(true) }}
+              onKeyDown={(e) => { if (e.key === 'Enter') run() }}
+              onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)} />
+            {q && (
+              <button className="search-clear" type="button" aria-label="Clear search" title="Clear"
+                onMouseDown={(e) => { e.preventDefault(); setQ(''); setSugg([]); setOpen(true) }}>✕</button>
+            )}
+          </div>
+          {(SpeechRec || CAN_RECORD) && (
+            <button className={`mic ${listening ? 'on' : ''}`} onClick={toggleMic} type="button"
+              title={listening ? 'Listening… click to stop' : 'Search by voice'}
+              aria-label="Search by voice" aria-pressed={listening}>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10a7 7 0 0 0 14 0" /><line x1="12" y1="19" x2="12" y2="22" />
+              </svg>
+            </button>
+          )}
+          <button className="go" style={{ background: cfg.accent }} onClick={() => run()}>Search</button>
+          {showDrop && (
+            <div className="suggest">
+              {qt === '' && (
+                <div className="sg-hd"><span>Recent searches</span>
+                  <button className="sg-clear" onMouseDown={(e) => { e.preventDefault(); clearHistory() }}>Clear</button></div>
+              )}
+              {(qt === '' ? history : histMatch).map((h) => (
+                <div key={'h' + h} className="sg">
+                  <button className="sg-main" onMouseDown={() => run(h)}><span className="sg-hic">🕘</span><span className="sg-name">{h}</span></button>
+                  <button className="sg-x" onMouseDown={(e) => { e.preventDefault(); removeHistory(h) }} title="Remove from history" aria-label={`Remove ${h}`}>✕</button>
+                </div>
+              ))}
+              {qt !== '' && sugg.map((s, i) => (
+                <div key={i} className="sg">
+                  <button className="sg-main" onMouseDown={() => run(s.name)}>
+                    {schema === 'dish'
+                      ? <img className="sg-img" src={foodImg({ name: s.name })} alt="" aria-hidden="true"
+                        onError={(e) => { const f = `${import.meta.env.BASE_URL}food/platter.jpg`; if (!e.target.src.endsWith('platter.jpg')) e.target.src = f; else e.target.style.visibility = 'hidden' }} />
+                      : <span className="sg-hic">🔍</span>}
+                    <span className="sg-name">{s.name}</span>
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
         </div>
-        {(SpeechRec || CAN_RECORD) && (
-          <button className={`mic ${listening ? 'on' : ''}`} onClick={toggleMic} type="button"
-            title={listening ? 'Listening… click to stop' : 'Search by voice'}
-            aria-label="Search by voice" aria-pressed={listening}>
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10a7 7 0 0 0 14 0" /><line x1="12" y1="19" x2="12" y2="22" />
-            </svg>
-          </button>
-        )}
-        <button className="go" style={{ background: cfg.accent }} onClick={() => run()}>Search</button>
-        {showDrop && (
-          <div className="suggest">
-            {qt === '' && (
-              <div className="sg-hd"><span>Recent searches</span>
-                <button className="sg-clear" onMouseDown={(e) => { e.preventDefault(); clearHistory() }}>Clear</button></div>
+        {micMsg && <div className={`mic-msg${listening ? ' live' : ''}`}>{listening && <span className="mic-dot" />}{micMsg}</div>}
+
+        {cfg.filters && (
+          <div className="filters">
+            <select className="select" value={cuisine} onChange={(e) => onCuisine(e.target.value)}>
+              <option value="">All cuisines</option>
+              {CUISINES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            {DIETS.map((d) => (
+              <button key={d} className={`fchip ${diet.includes(d) ? 'on' : ''}`} onClick={() => toggleDiet(d)}
+                style={diet.includes(d) ? { borderColor: DIET_COLOR[d], color: DIET_COLOR[d], background: DIET_COLOR[d] + '14' } : {}}>{d}</button>
+            ))}
+            <select className="select" value={maxprice} onChange={(e) => onPrice(e.target.value)} title="Per-head budget (matches how 'under $X a head' is understood)">
+              <option value="">Any price</option>
+              <option value="10">under $10/head</option>
+              <option value="15">under $15/head</option>
+              <option value="25">under $25/head</option>
+            </select>
+            <select className="select" value={headcount} onChange={(e) => onHeadcount(e.target.value)} title="Only platters that serve at least this many (matches 'for N people')">
+              <option value="">Any headcount</option>
+              <option value="10">for 10 people</option>
+              <option value="20">for 20 people</option>
+              <option value="25">for 25 people</option>
+              <option value="50">for 50 people</option>
+            </select>
+            {srcEntries.length > 1 && (
+              <select className="select src-select" value={source} onChange={(e) => onSource(e.target.value)} title="Filter by ingestion source (provenance)">
+                <option value="">All sources</option>
+                {srcEntries.map(([s, n]) => <option key={s} value={s}>{SRC_LABEL[s] || s} ({n})</option>)}
+              </select>
             )}
-            {(qt === '' ? history : histMatch).map((h) => (
-              <div key={'h' + h} className="sg">
-                <button className="sg-main" onMouseDown={() => run(h)}><span className="sg-hic">🕘</span><span className="sg-name">{h}</span></button>
-                <button className="sg-x" onMouseDown={(e) => { e.preventDefault(); removeHistory(h) }} title="Remove from history" aria-label={`Remove ${h}`}>✕</button>
-              </div>
-            ))}
-            {qt !== '' && sugg.map((s, i) => (
-              <div key={i} className="sg">
-                <button className="sg-main" onMouseDown={() => run(s.name)}>
-                  {schema === 'dish'
-                    ? <img className="sg-img" src={foodImg({ name: s.name })} alt="" aria-hidden="true"
-                        onError={(e) => { const f = `${import.meta.env.BASE_URL}food/platter.jpg`; if (!e.target.src.endsWith('platter.jpg')) e.target.src = f; else e.target.style.visibility = 'hidden' }} />
-                    : <span className="sg-hic">🔍</span>}
-                  <span className="sg-name">{s.name}</span>
-                </button>
-              </div>
-            ))}
           </div>
         )}
-      </div>
-      {micMsg && <div className={`mic-msg${listening ? ' live' : ''}`}>{listening && <span className="mic-dot" />}{micMsg}</div>}
-
-      {cfg.filters && (
-        <div className="filters">
-          <select className="select" value={cuisine} onChange={(e) => onCuisine(e.target.value)}>
-            <option value="">All cuisines</option>
-            {CUISINES.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-          {DIETS.map((d) => (
-            <button key={d} className={`fchip ${diet.includes(d) ? 'on' : ''}`} onClick={() => toggleDiet(d)}
-              style={diet.includes(d) ? { borderColor: DIET_COLOR[d], color: DIET_COLOR[d], background: DIET_COLOR[d] + '14' } : {}}>{d}</button>
-          ))}
-          <select className="select" value={maxprice} onChange={(e) => onPrice(e.target.value)} title="Per-head budget (matches how 'under $X a head' is understood)">
-            <option value="">Any price</option>
-            <option value="10">under $10/head</option>
-            <option value="15">under $15/head</option>
-            <option value="25">under $25/head</option>
-          </select>
-          <select className="select" value={headcount} onChange={(e) => onHeadcount(e.target.value)} title="Only platters that serve at least this many (matches 'for N people')">
-            <option value="">Any headcount</option>
-            <option value="10">for 10 people</option>
-            <option value="20">for 20 people</option>
-            <option value="25">for 25 people</option>
-            <option value="50">for 50 people</option>
-          </select>
-          {srcEntries.length > 1 && (
-            <select className="select src-select" value={source} onChange={(e) => onSource(e.target.value)} title="Filter by ingestion source (provenance)">
-              <option value="">All sources</option>
-              {srcEntries.map(([s, n]) => <option key={s} value={s}>{SRC_LABEL[s] || s} ({n})</option>)}
-            </select>
-          )}
-        </div>
-      )}
       </div>
 
       {cfg.filters && (
