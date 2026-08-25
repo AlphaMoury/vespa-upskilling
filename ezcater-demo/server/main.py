@@ -47,6 +47,15 @@ SCHEMAS = {"dish": {"title": "name"}, "covid": {"title": "title"}, "question": {
 app = FastAPI(title="Vespa x LLM catering search")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+# The Knowledge Graph studio (ontology model store, materializer, graph query engine).
+# Guarded like the ingest imports above: the search API must still boot if it fails.
+try:
+    from kg_api import router as kg_router
+    app.include_router(kg_router)
+except Exception as e:  # noqa: BLE001
+    print(f"!! knowledge-graph API unavailable: {e}")
+
+
 # warm the local e5 cache embedder in the background so the first query isn't slowed by load
 if ingest_semcache is not None:
     import threading

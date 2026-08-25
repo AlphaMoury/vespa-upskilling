@@ -32,3 +32,6 @@ ezcater-demo/data/.enrich_cache.json
 ezcater-demo/data/.semcache.json
 ezcater-demo/data/ontology_graph.json
 ezcater-demo/data/ontology_graph_bkup.json
+
+# Knowledge Graph materialized ABox (derived cache; rebuilt from the TBox + dishes.jsonl)
+ezcater-demo/data/kg_graphs/

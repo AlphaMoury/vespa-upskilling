@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import KnowledgeGraph from './KnowledgeGraph'
 
 const API = 'http://localhost:8009'    // Python ML sidecar: search, understand, graph, upload (cutover in progress)
 const GO_API = 'http://localhost:8090' // Go search-api: typeahead (first endpoint through the Go layer)
@@ -578,171 +579,6 @@ function UploadMenu({ onDone }) {
   )
 }
 
-// Interactive ontology graph: start from anchors (cuisines/allergens/diets), click a node
-// to expand its neighbors, click again to collapse. Backed by vis-network.
-function GraphExplorer() {
-  const boxRef = useRef(null)
-  const net = useRef(null)
-  const nodesDS = useRef(null)
-  const edgesDS = useRef(null)
-  const expanded = useRef(new Set())
-  const [stats, setStats] = useState(null)
-  const [full, setFull] = useState(false)
-  const [sq, setSq] = useState('')
-  const [sugg, setSugg] = useState([])
-
-  const toVisNode = (n) => {
-    const anchor = n.kind !== 'ingredient'
-    const c = KIND_COLOR[n.kind] || '#9aa0a6'
-    return {
-      id: n.id, label: n.label, _anchor: anchor,
-      shape: 'box', margin: anchor ? 12 : 8, shapeProperties: { borderRadius: anchor ? 20 : 11 },
-      color: {
-        background: anchor ? c : '#ffffff', border: c,
-        highlight: { background: anchor ? c : '#eef7f4', border: c },
-        hover: { background: anchor ? c : '#f3f8f7', border: c },
-      },
-      font: { color: anchor ? '#ffffff' : '#2b3440', size: anchor ? 18 : 14, face: 'Inter, system-ui, sans-serif' },
-      borderWidth: anchor ? 0 : 1.5, borderWidthSelected: 3,
-    }
-  }
-  const REL = {
-    FEATURES: { color: '#17a08e', dashes: false, label: 'features' },       // cuisine -> ingredient
-    MEMBER: { color: '#a15c00', dashes: false, label: 'is a' },             // ingredient -> category
-    CONTAINS: { color: '#c62828', dashes: true, label: 'contains' },        // ingredient -> allergen
-    CONFLICTS: { color: '#c62828', dashes: true, label: 'not allowed in' }, // ingredient -> diet it violates
-  }
-  const toVisEdge = (e) => {
-    const r = REL[e.rel] || { color: '#8a94a6', dashes: false, label: (e.rel || '').toLowerCase() }
-    return {
-      id: `${e.from}->${e.to}`, from: e.from, to: e.to,
-      arrows: { to: { enabled: true, scaleFactor: 0.55 } }, dashes: r.dashes, label: r.label,
-      font: { size: 11, color: '#6b7280', strokeWidth: 4, strokeColor: '#ffffff', align: 'middle' },
-      color: { color: r.color, opacity: 0.5, highlight: '#5b4b8a', hover: '#5b4b8a' },
-    }
-  }
-
-  const expand = (id) => {
-    const nodes = nodesDS.current, edges = edgesDS.current
-    if (!nodes || expanded.current.has(id)) return null
-    expanded.current.add(id)
-    return fetch(`${API}/api/graph/neighbors?node=${encodeURIComponent(id)}`).then((r) => r.json()).then((d) => {
-      nodes.update((d.nodes || []).map(toVisNode)); edges.update((d.edges || []).map(toVisEdge))
-    }).catch(() => { })
-  }
-  const collapse = (id) => {
-    const nodes = nodesDS.current, edges = edgesDS.current
-    expanded.current.delete(id)
-    const nbrs = edges.get().filter((e) => e.from === id || e.to === id).map((e) => (e.from === id ? e.to : e.from))
-    nbrs.forEach((nid) => {
-      const nd = nodes.get(nid)
-      if (!nd || nd._anchor || expanded.current.has(nid)) return
-      if (edges.get().filter((e) => e.from === nid || e.to === nid).length <= 1) nodes.remove(nid)
-    })
-    const present = new Set(nodes.getIds())
-    edges.remove(edges.get().filter((e) => !present.has(e.from) || !present.has(e.to)).map((e) => e.id))
-  }
-  const toggle = (id) => (expanded.current.has(id) ? collapse(id) : expand(id))
-
-  useEffect(() => {
-    let dead = false
-    import('vis-network/standalone').then(({ Network, DataSet }) => {
-      if (dead || !boxRef.current) return
-      const nodes = new DataSet([]), edges = new DataSet([])
-      nodesDS.current = nodes; edgesDS.current = edges
-      net.current = new Network(boxRef.current, { nodes, edges }, {
-        autoResize: true,
-        physics: {
-          solver: 'barnesHut',
-          barnesHut: { gravitationalConstant: -8500, centralGravity: 0.22, springLength: 150, springConstant: 0.035, damping: 0.55, avoidOverlap: 0.5 },
-          stabilization: { enabled: true, iterations: 200, updateInterval: 25 },
-        },
-        interaction: { hover: true, tooltipDelay: 100, zoomView: true, dragView: true, dragNodes: true },
-        nodes: { shadow: { enabled: true, size: 6, x: 0, y: 2, color: 'rgba(15,23,41,0.14)' } },
-        edges: { smooth: { enabled: true, type: 'dynamic' }, width: 1.6, hoverWidth: 0.8 },
-      })
-      net.current.on('click', (p) => { if (p.nodes.length) toggle(p.nodes[0]) })
-      fetch(`${API}/api/graph/roots`).then((r) => r.json()).then((d) => {
-        nodes.add((d.nodes || []).map(toVisNode)); setStats(d.stats)
-        setTimeout(() => net.current?.fit?.({ animation: { duration: 500 } }), 300)
-      }).catch(() => { })
-    })
-    return () => { dead = true; net.current?.destroy?.() }
-  }, [])
-
-  // typeahead search over all graph nodes
-  useEffect(() => {
-    if (!sq.trim()) { setSugg([]); return }
-    const t = setTimeout(() => {
-      fetch(`${API}/api/graph/search?q=${encodeURIComponent(sq)}`).then((r) => r.json())
-        .then((d) => setSugg(d.nodes || [])).catch(() => setSugg([]))
-    }, 130)
-    return () => clearTimeout(t)
-  }, [sq])
-
-  // force vis-network to recompute its canvas size when entering/leaving fullscreen, + Escape
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') setFull(false) }
-    window.addEventListener('keydown', onKey)
-    const resize = () => { try { net.current?.setSize?.('100%', '100%'); net.current?.redraw?.(); net.current?.fit?.({ animation: { duration: 350 } }) } catch { /* noop */ } }
-    const t1 = setTimeout(resize, 80)
-    const t2 = setTimeout(resize, 320)   // second pass after layout settles
-    return () => { window.removeEventListener('keydown', onKey); clearTimeout(t1); clearTimeout(t2) }
-  }, [full])
-
-  const focusNode = (n) => {
-    const nodes = nodesDS.current
-    if (!nodes) return
-    if (!nodes.get(n.id)) nodes.add(toVisNode(n))
-    const done = () => { net.current?.selectNodes?.([n.id]); net.current?.focus?.(n.id, { scale: 1.1, animation: { duration: 600 } }) }
-    if (!expanded.current.has(n.id)) { const p = expand(n.id); (p && p.then ? p : Promise.resolve()).then(() => setTimeout(done, 80)) }
-    else setTimeout(done, 20)
-    setSq(''); setSugg([])
-  }
-  const reset = () => {
-    const nodes = nodesDS.current, edges = edgesDS.current
-    if (!nodes) return
-    expanded.current = new Set(); edges.clear(); nodes.clear()
-    fetch(`${API}/api/graph/roots`).then((r) => r.json()).then((d) => {
-      nodes.add((d.nodes || []).map(toVisNode)); setTimeout(() => net.current?.fit?.({ animation: { duration: 400 } }), 200)
-    })
-  }
-
-  return (
-    <div className={`gexp ${full ? 'full' : ''}`}>
-      <div className="gexp-bar">
-        <span className="gexp-title">🕸 Ontology graph</span>
-        <div className="gexp-search">
-          <input value={sq} onChange={(e) => setSq(e.target.value)} placeholder="search a node — tahini, nuts, Italian…"
-            onBlur={() => setTimeout(() => setSugg([]), 150)} />
-          {sugg.length > 0 && (
-            <div className="gexp-sugg">
-              {sugg.map((n) => (
-                <div key={n.id} className="gexp-sg" onMouseDown={() => focusNode(n)}>
-                  <i style={{ background: KIND_COLOR[n.kind] || '#9aa0a6' }} /><span>{n.label}</span><em>{n.kind}</em>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <button className="gexp-btn" onClick={() => net.current?.fit?.({ animation: { duration: 400 } })} title="fit to view">⤢ fit</button>
-        <button className="gexp-btn" onClick={reset} title="reset to anchors">↺ reset</button>
-        <button className="gexp-btn" onClick={() => setFull((v) => !v)}>{full ? '✕ exit' : '⛶ fullscreen'}</button>
-        {stats && <span className="gexp-stats">{stats.ingredient} ingredients · {stats.cuisine} cuisines · {stats.allergen} allergens · {stats.edges} edges</span>}
-      </div>
-      <div className="gexp-legend">
-        <span><i style={{ background: KIND_COLOR.cuisine }} />cuisine</span>
-        <span><i style={{ background: KIND_COLOR.category }} />category</span>
-        <span><i style={{ background: KIND_COLOR.allergen }} />allergen</span>
-        <span><i style={{ background: KIND_COLOR.diet }} />diet</span>
-        <span><i style={{ background: '#fff', borderColor: '#9aa0a6' }} />ingredient</span>
-        <span className="gexp-tip">click a node to expand · click again to collapse</span>
-      </div>
-      <div ref={boxRef} className="gexp-canvas" />
-    </div>
-  )
-}
-
 export default function App() {
   const [schema, setSchema] = useState('dish')
   const [q, setQ] = useState('')
@@ -770,7 +606,7 @@ export default function App() {
   const [headcount, setHeadcount] = useState('')
   const [source, setSource] = useState('')
   const [understand, setUnderstand] = useState(false)
-  const [showGraph, setShowGraph] = useState(false)
+  const [kgOpen, setKgOpen] = useState(false)
   const cfg = INDEXES[schema]
 
   const refreshHealth = useCallback(() => {
@@ -1006,8 +842,17 @@ export default function App() {
             {health?.counts?.[key] != null && <span className="tab-n">{health.counts[key].toLocaleString()}</span>}
           </button>
         ))}
+        <button className={`tab ${kgOpen ? 'on' : ''}`}
+          style={kgOpen ? { borderColor: '#5b4b8a', color: '#5b4b8a' } : {}}
+          onClick={() => setKgOpen((v) => !v)}>
+          <span className="tab-ic">🕸</span>Knowledge Graph
+          {health?.graph && <span className="tab-n">{health.graph.edges.toLocaleString()}</span>}
+        </button>
       </div>
 
+      {kgOpen && <KnowledgeGraph />}
+
+      {!kgOpen && (<>
       <div className="sticky-bar">
         <div className="searchwrap">
           <div className="search-field">
@@ -1179,19 +1024,15 @@ export default function App() {
       {/* 3) everything else, LAST, behind a collapsible "More" */}
       {cfg.filters && (
         <details className="more">
-          <summary className="more-sum">✨ More<span className="more-hint">explore the ontology graph · upload a menu</span></summary>
+          <summary className="more-sum">✨ More<span className="more-hint">resolve duplicate entities · upload a menu</span></summary>
           <div className="more-body">
-            <div className="tools">
-              <button className={`tool-btn ${showGraph ? 'on' : ''}`} onClick={() => setShowGraph((v) => !v)}>
-                🕸 {showGraph ? 'Hide' : 'Explore'} the ontology graph{health?.graph ? ` (${health.graph.ingredient} ingredients)` : ''}
-              </button>
-            </div>
-            {showGraph && schema === 'dish' && <GraphExplorer />}
             {schema === 'dish' && <EntityResolution onDone={refreshHealth} />}
             <UploadMenu onDone={refreshHealth} />
           </div>
         </details>
       )}
+
+      </>)}
 
       <footer className="ftr">One Vespa engine · three indexes · multi-source ingestion (sample catalog · Food.com recipes · menu PDFs) → one schema → hybrid BM25 ⊕ e5 vectors (RRF). Allergens/diet are index-time enriched; excluded as hard filters.</footer>
     </div>
