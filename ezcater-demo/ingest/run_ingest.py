@@ -7,6 +7,9 @@ Examples (run from ezcater-demo/, via ../capstone/.venv/bin/python):
     # inspect only (no Vespa needed) — enrich 5 real recipes and print them
     python -m ingest.run_ingest --source hf --limit 5 --print
 
+    # grow + persist the ONTOLOGY GRAPH only — no Vespa, no index, nothing to feed
+    python -m ingest.run_ingest --source hf --limit 3000 --graph-only
+
     # one-time: redeploy schema (adds `source` field) then feed 3000 real recipes
     python -m ingest.run_ingest --source hf --limit 3000 --deploy
 
@@ -17,7 +20,7 @@ Examples (run from ezcater-demo/, via ../capstone/.venv/bin/python):
     python -m ingest.run_ingest --source synthetic
 
 Flags: --dataset foodcom|datahive (hf), --path PATH (pdf/synthetic), --deploy (redeploy
-first), --print (dry-run, no feed), --limit N.
+first), --print (dry-run, no feed), --graph-only (ontology only, no Vespa), --limit N.
 """
 
 from __future__ import annotations
@@ -70,17 +73,30 @@ def main():
     ap.add_argument("--limit", type=int, default=2000)
     ap.add_argument("--deploy", action="store_true", help="redeploy schema first (additive)")
     ap.add_argument("--print", dest="dry", action="store_true", help="dry-run: enrich + print, no feed")
+    ap.add_argument("--graph-only", action="store_true",
+                    help="grow + save the ontology graph only: no Vespa, no feed")
     args = ap.parse_args()
 
     print(f">> ingest source={args.source} limit={args.limit}  LLM={config.status()}")
     adapter = build_adapter(args)
     stats = {"n": 0, "low_conf": 0, "with_allergens": 0}
 
-    if args.dry:
-        for i, item in enumerate(iter_items(adapter, limit=min(args.limit, 20))):
+    # ---- no-Vespa paths. enrich() is what GROWS the graph, so both persist it: --print
+    #      previews a handful of docs, --graph-only runs the full --limit for the ontology.
+    if args.dry or args.graph_only:
+        n = 0
+        for item in iter_items(adapter, limit=min(args.limit, 20) if args.dry else args.limit):
             enrich(item)
-            print(json.dumps(item.as_dict(), ensure_ascii=False)[:1000])
-        print(f"\n[dry-run] cache={cache.backend()} hits={cache.stats['hits']} misses={cache.stats['misses']}")
+            n += 1
+            if args.dry:
+                print(json.dumps(item.as_dict(), ensure_ascii=False)[:1000])
+            elif n % 200 == 0:
+                print(f"   enriched {n:,}  (cache hits={cache.stats['hits']})")
+        g = get_graph()
+        g.save()
+        print(f"\n[no-vespa] enriched={n:,}  cache={cache.backend()} "
+              f"hits={cache.stats['hits']} misses={cache.stats['misses']}")
+        print(f"   ontology graph: {g.stats()}  -> saved")
         return
 
     # ---- feed to Vespa ----
